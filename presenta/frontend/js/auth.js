@@ -1,4 +1,4 @@
-const API = location.port === '4000' ? '' : 'http://localhost:4000';
+const API = ''; 
 const el = (id) => document.getElementById(id);
 
 const post = async (path, body) => {

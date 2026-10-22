@@ -238,7 +238,8 @@ const mount = (app) => {
     res.json(out);
   }));
 
-  app.post('/api/events', ...orgAccess, wrap((req, res) => {
+  // FIXED: Ensure save is awaited before sending response
+  app.post('/api/events', ...orgAccess, wrap(async (req, res) => {
     const blocked = orgGate(req.user);
     if (blocked) return res.status(403).json({ message: blocked });
     const org = db.data.orgs.find((o) => o.id === req.user.org_id);
@@ -255,12 +256,13 @@ const mount = (app) => {
       created_at: db.now()
     };
     db.data.events.push(e);
-    db.save();
+    await db.save(); // Crucial: Wait for save to complete
     db.log(req.user, 'event_create', e.title + ' (draft)');
     res.status(201).json(present(e, req.user));
   }));
 
-  app.put('/api/events/:id', ...orgAccess, wrap((req, res) => {
+  // FIXED: Ensure save is awaited
+  app.put('/api/events/:id', ...orgAccess, wrap(async (req, res) => {
     const e = findEvent(req, res, 'own');
     if (!e) return;
     const blocked = orgGate(req.user);
@@ -280,12 +282,13 @@ const mount = (app) => {
       return res.status(400).json({ message: 'Seat limit cannot be lower than the ' + taken + ' seats already reserved' });
     }
     Object.assign(e, parsed.value);
-    db.save();
+    await db.save();
     db.log(req.user, 'event_edit', e.title);
     res.json(present(e, req.user));
   }));
 
-  app.post('/api/events/:id/submit', ...orgAccess, wrap((req, res) => {
+  // FIXED: Ensure save is awaited
+  app.post('/api/events/:id/submit', ...orgAccess, wrap(async (req, res) => {
     const e = findEvent(req, res, 'own');
     if (!e) return;
     const blocked = orgGate(req.user);
@@ -310,7 +313,7 @@ const mount = (app) => {
     e.status = 'pending';
     e.registration = 'closed';
     e.approval_note = '';
-    db.save();
+    await db.save();
     db.log(req.user, 'event_submit', e.title + ' fee ' + amount + ' ref ' + reference);
     const org = orgOf(e);
     approvers().forEach((a) => db.notify(a.id, 'Event awaiting approval', '"' + e.title + '" from ' + (org ? org.name : 'an organization') + ' paid ' + amount + ' (ref ' + reference + ') and needs SAO approval.'));
@@ -322,7 +325,7 @@ const mount = (app) => {
     res.json(db.data.settings);
   });
 
-  app.put('/api/settings', authenticate, requirePriv('manage_subscriptions'), wrap((req, res) => {
+  app.put('/api/settings', authenticate, requirePriv('manage_subscriptions'), wrap(async (req, res) => {
     const b = req.body || {};
     const st = db.data.settings;
     if (b.paid_rate !== undefined) {
@@ -344,7 +347,7 @@ const mount = (app) => {
       }
       st.wallet_qr = q;
     }
-    db.save();
+    await db.save();
     db.log(req.user, 'settings_update', 'rate ' + st.paid_rate + '% free ' + st.free_fee);
     res.json(st);
   }));
@@ -379,7 +382,8 @@ const mount = (app) => {
     res.json(list);
   }));
 
-  app.post('/api/events/:id/approval', authenticate, requirePriv('approve_events'), wrap((req, res) => {
+  // FIXED: Ensure save is awaited
+  app.post('/api/events/:id/approval', authenticate, requirePriv('approve_events'), wrap(async (req, res) => {
     const e = db.data.events.find((x) => x.id === req.params.id);
     if (!e) return res.status(404).json({ message: 'Event not found' });
     if (e.status !== 'pending') return res.status(400).json({ message: 'This event is not waiting for approval' });
@@ -399,7 +403,7 @@ const mount = (app) => {
     }
     e.decided_by = req.user.id;
     e.decided_at = db.now();
-    db.save();
+    await db.save();
     db.log(req.user, 'event_' + (decision === 'approve' ? 'approved' : 'disapproved'), e.title);
     const payNote = e.payment ? (decision === 'approve' ? ' Your payment (ref ' + e.payment.reference + ') was verified.' : ' Your payment (ref ' + e.payment.reference + ') was not verified.') : '';
     const msg = decision === 'approve'
@@ -409,17 +413,19 @@ const mount = (app) => {
     res.json({ message: decision === 'approve' ? 'Event approved' : 'Event disapproved', event: present(e, req.user) });
   }));
 
-  app.post('/api/events/:id/registration', ...orgAccess, wrap((req, res) => {
+  // FIXED: Ensure save is awaited
+  app.post('/api/events/:id/registration', ...orgAccess, wrap(async (req, res) => {
     const e = findEvent(req, res, 'own');
     if (!e) return;
     if (e.status !== 'published') return res.status(400).json({ message: 'Publish the event first' });
     e.registration = req.body && req.body.open ? 'open' : 'closed';
-    db.save();
+    await db.save();
     db.log(req.user, 'registration_' + e.registration, e.title);
     res.json(present(e, req.user));
   }));
 
-  app.delete('/api/events/:id', ...orgAccess, wrap((req, res) => {
+  // FIXED: Ensure save is awaited and this route is CLEARLY not called on creation
+  app.delete('/api/events/:id', ...orgAccess, wrap(async (req, res) => {
     const e = findEvent(req, res, 'own');
     if (!e) return;
     if (e.status !== 'draft' && activeRegs(e.id).length) {
@@ -427,7 +433,7 @@ const mount = (app) => {
     }
     db.data.events = db.data.events.filter((x) => x.id !== e.id);
     db.data.registrations = db.data.registrations.filter((r) => r.event_id !== e.id);
-    db.save();
+    await db.save();
     db.log(req.user, 'event_delete', e.title);
     res.json({ message: 'Event deleted' });
   }));
@@ -449,7 +455,8 @@ const mount = (app) => {
     res.json({ code, image });
   }));
 
-  app.post('/api/events/:id/register', authenticate, requireRole('student'), wrap((req, res) => {
+  // FIXED: Ensure save is awaited
+  app.post('/api/events/:id/register', authenticate, requireRole('student'), wrap(async (req, res) => {
     const e = db.data.events.find((x) => x.id === req.params.id && x.status === 'published');
     const u = req.user;
     if (!e) return res.status(404).json({ message: 'Event not found' });
@@ -472,13 +479,14 @@ const mount = (app) => {
       attended: false
     };
     db.data.registrations.push(reg);
-    db.save();
+    await db.save();
     db.log(u, 'seat_reserve', e.title + ' seat ' + seat);
     db.notify(u.id, 'Seat confirmed', 'Seat ' + seat + ' is reserved for "' + e.title + '" at ' + e.venue + '.');
     res.status(201).json({ message: 'Seat ' + seat + ' confirmed', registration: reg });
   }));
 
-  app.delete('/api/events/:id/register', authenticate, requireRole('student'), wrap((req, res) => {
+  // FIXED: Ensure save is awaited
+  app.delete('/api/events/:id/register', authenticate, requireRole('student'), wrap(async (req, res) => {
     const e = db.data.events.find((x) => x.id === req.params.id);
     const reg = db.data.registrations.find((r) => r.event_id === req.params.id && r.student_id === req.user.id && r.status === 'reserved');
     if (!e || !reg) return res.status(404).json({ message: 'No seat found for this event' });
@@ -486,7 +494,7 @@ const mount = (app) => {
     if (phaseOf(e) !== 'upcoming') return res.status(400).json({ message: 'You cannot cancel after the event has started' });
     reg.status = 'cancelled';
     reg.cancelled_at = db.now();
-    db.save();
+    await db.save();
     db.log(req.user, 'seat_cancel', e.title);
     db.notify(req.user.id, 'Seat cancelled', 'Your seat for "' + e.title + '" was cancelled.');
     res.json({ message: 'Seat cancelled' });
@@ -504,7 +512,8 @@ const mount = (app) => {
     res.json(out);
   }));
 
-  app.post('/api/attendance/scan', authenticate, requireRole('student'), wrap((req, res) => {
+  // FIXED: Ensure save is awaited
+  app.post('/api/attendance/scan', authenticate, requireRole('student'), wrap(async (req, res) => {
     const reject = (message, status) => res.status(status || 400).json({ valid: false, message });
     const parts = clean(req.body && req.body.code).split('|');
     if (parts.length !== 3 || parts[0] !== 'PRESENTA') return reject('Invalid QR code');
@@ -524,13 +533,14 @@ const mount = (app) => {
     if (dist > e.radius_m) return reject('You are about ' + Math.round(dist) + ' m from the venue. Check-in works within ' + e.radius_m + ' m.', 403);
     reg.attended = true;
     reg.attended_at = db.now();
-    db.save();
+    await db.save();
     db.log(req.user, 'attendance', e.title);
     db.notify(req.user.id, 'Attendance recorded', 'You were checked in to "' + e.title + '". Stay within the venue for 5 minutes to keep your attendance.');
     res.json({ valid: true, message: 'Attendance recorded', attended_at: reg.attended_at, monitor_until: new Date(t + ATTEND_WINDOW_MS).toISOString(), event: { id: e.id, title: e.title, venue: e.venue } });
   }));
 
-  app.post('/api/attendance/ping', authenticate, requireRole('student'), wrap((req, res) => {
+  // FIXED: Ensure save is awaited
+  app.post('/api/attendance/ping', authenticate, requireRole('student'), wrap(async (req, res) => {
     const e = db.data.events.find((x) => x.id === clean(req.body && req.body.event_id));
     const here = geoIn(req.body);
     const reg = e && db.data.registrations.find((r) => r.event_id === e.id && r.student_id === req.user.id && r.attended);
@@ -539,14 +549,15 @@ const mount = (app) => {
     if (distanceM(here, e.geo) <= e.radius_m) return res.json({ active: true });
     reg.attended = false;
     reg.left_at = db.now();
-    db.save();
+    await db.save();
     db.log(req.user, 'left_venue', e.title);
     const message = 'You left the venue within 5 minutes of checking in, so your attendance is not valid.';
     db.notify(req.user.id, 'Attendance not valid', message);
     res.json({ active: false, left: true, message });
   }));
 
-  app.post('/api/events/:id/report', ...orgAccess, wrap((req, res) => {
+  // FIXED: Ensure save is awaited
+  app.post('/api/events/:id/report', ...orgAccess, wrap(async (req, res) => {
     const e = findEvent(req, res, 'own');
     if (!e) return;
     const rows = attendanceRows(e).map((r) => ({ ...r, status: r.attended ? 'Present' : r.left ? 'Left the venue' : 'Absent' }));
@@ -571,7 +582,7 @@ const mount = (app) => {
       generated_by: req.user.name,
       rows
     });
-    db.save();
+    await db.save();
     db.log(req.user, 'report_generate', e.title);
     res.json({ message: 'Attendance report saved', report: rep });
   }));

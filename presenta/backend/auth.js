@@ -115,7 +115,7 @@ const register = wrap(async (req, res) => {
   }
 
   db.data.users.push(user);
-  db.save();
+  await db.save(); // FIXED: Wait for save to complete
   db.log(user, 'register', role + ' account created: ' + email);
   res.status(201).json({ message: 'Registered. Your account is waiting for SAO verification.' });
 });
@@ -130,6 +130,7 @@ const login = wrap(async (req, res) => {
   if (user.status === 'rejected') return res.status(403).json({ message: 'Your account was rejected by SAO.' });
   if (user.status === 'suspended') return res.status(403).json({ message: 'Your account is suspended.' });
   db.log(user, 'login', 'Signed in');
+  await db.save(); // FIXED: Wait for log to save
   res.json({ token: sign(user), user: db.pub(user), redirectUrl: REDIRECT[user.role] });
 });
 
@@ -140,7 +141,7 @@ const forgot = wrap(async (req, res) => {
     const code = String(Math.floor(100000 + Math.random() * 900000));
     user.reset_code = await bcrypt.hash(code, 8);
     user.reset_expires = Date.now() + 15 * 60 * 1000;
-    db.save();
+    await db.save();
     const result = await mailer.send(user.email, 'Presenta password reset', 'Your reset code is ' + code + '. It expires in 15 minutes.');
     if (!result.sent) {
       console.log('[reset] ' + user.email + ' code: ' + code);
@@ -161,7 +162,7 @@ const reset = wrap(async (req, res) => {
   user.password = await bcrypt.hash(password, 10);
   delete user.reset_code;
   delete user.reset_expires;
-  db.save();
+  await db.save();
   db.log(user, 'password_reset', 'Password reset with code');
   res.json({ message: 'Password updated. You can log in now.' });
 });
@@ -209,7 +210,7 @@ const updateMe = wrap(async (req, res) => {
     });
   }
   if (useCredit && (u.edit_credits || 0) > 0) u.edit_credits -= 1;
-  db.save();
+  await db.save();
   db.log(u, 'profile_update', 'Profile updated');
   res.json({ user: db.pub(u) });
 });
@@ -229,11 +230,11 @@ const mount = (app) => {
       .slice(0, 100);
     res.json({ items, unread: items.filter((n) => !n.read).length });
   });
-  app.post('/api/notifications/read', authenticate, (req, res) => {
+  app.post('/api/notifications/read', authenticate, async (req, res) => {
     db.data.notifications.forEach((n) => {
       if (n.user_id === req.user.id) n.read = true;
     });
-    db.save();
+    await db.save();
     res.json({ ok: true });
   });
 };
@@ -252,7 +253,7 @@ const seed = async () => {
     privileges: db.ALL_PRIVS.slice(),
     created_at: db.now()
   });
-  db.save();
+  await db.save();
   console.log('Super admin created: ' + email);
 };
 

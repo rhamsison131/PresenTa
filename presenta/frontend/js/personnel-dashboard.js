@@ -11,7 +11,7 @@ window.api = async function(path, opt) {
 
 // --- 2. ACCOUNT VERIFICATIONS UI ---
 const AccountsUI = {
-    orgDeptFilter: '', // Stores the selected department filter for approved orgs
+    orgDeptFilter: '', 
 
     async view(el) {
         el.innerHTML = '<div class="loading">Loading accounts...</div>';
@@ -19,15 +19,16 @@ const AccountsUI = {
             const students = await api('/api/verify/students');
             const orgs = await api('/api/verify/orgs');
 
-            // --- STUDENT LOGIC ---
-            // Show all students EXCEPT those who were rejected
+            // Keep ALL students who are not rejected
             const displayStudents = students.filter(s => s.status !== 'rejected'); 
+            
+            // Show orgs that are pending or not accredited
+            const displayOrgs = orgs.filter(o => o.status !== 'accredited');
 
             const studentRows = displayStudents.map(u => {
-                // Format Date Approved (fallback to created_at if not tracked)
                 const dateApproved = u.approved_at ? fmtD(u.approved_at) : (u.status === 'active' ? fmtD(u.created_at) : '—');
                 
-                // Dynamic Buttons: Hide Approve if already active
+                // Dynamic Buttons
                 const actions = u.status === 'active' 
                     ? `<button class="btn sm ghost" onclick="AccountsUI.verifyStudent('${esc(u.id)}', 'hold')">Hold</button>
                        <button class="btn sm danger" onclick="AccountsUI.verifyStudent('${esc(u.id)}', 'reject')">Reject</button>`
@@ -51,21 +52,13 @@ const AccountsUI = {
             `}).join('');
 
             // --- ORGANIZATION LOGIC ---
-            // Pending orgs (to be reviewed)
-            const pendingOrgs = orgs.filter(o => o.status !== 'accredited');
-            
-            // Approved orgs (for the bottom section)
             const approvedOrgs = orgs.filter(o => o.status === 'accredited');
-            
-            // Apply the Department Filter to Approved Orgs
             const filteredApprovedOrgs = AccountsUI.orgDeptFilter 
                 ? approvedOrgs.filter(o => (o.department || 'University-wide') === AccountsUI.orgDeptFilter)
                 : approvedOrgs;
-
-            // Extract unique departments from approved orgs for the dropdown
             const approvedDepts = Array.from(new Set(approvedOrgs.map(o => o.department || 'University-wide'))).sort();
 
-            const pendingOrgRows = pendingOrgs.map(o => `
+            const pendingOrgRows = displayOrgs.map(o => `
                 <tr>
                     <td><b>${esc(o.name)}</b><small>${esc(o.department || 'University-wide')}</small></td>
                     <td>${o.officers.length} Officer(s)<small>${o.officers.map(x => x.name).join(', ')}</small></td>
@@ -80,9 +73,7 @@ const AccountsUI = {
             `).join('');
 
             const approvedOrgRows = filteredApprovedOrgs.map(o => {
-                // Note: If your DB doesn't have accredited_at, it falls back to created_at
                 const dateApproved = o.accredited_at ? fmtD(o.accredited_at) : (o.accredited_until ? fmtD(new Date(new Date(o.accredited_until).setFullYear(new Date(o.accredited_until).getFullYear() - 1))) : fmtD(o.created_at));
-                
                 return `
                 <tr>
                     <td><b>${esc(o.name)}</b></td>
@@ -101,7 +92,7 @@ const AccountsUI = {
 
                 <div class="card">
                     <div class="toolbar"><h3 style="margin:0">Pending Organizations</h3></div>
-                    ${pendingOrgs.length ? tableHtml(['Organization', 'Officers', 'Status', 'Actions'], [pendingOrgRows]) : '<div class="empty">No pending organizations.</div>'}
+                    ${displayOrgs.length ? tableHtml(['Organization', 'Officers', 'Status', 'Actions'], [pendingOrgRows]) : '<div class="empty">No pending organizations.</div>'}
                 </div>
 
                 <div class="card">
@@ -116,12 +107,10 @@ const AccountsUI = {
                 </div>
             `;
 
-            // Bind the filter dropdown
             const filterDropdown = $('#deptFilter', el);
             if (filterDropdown) {
                 filterDropdown.onchange = (e) => {
                     AccountsUI.orgDeptFilter = e.target.value;
-                    // Re-render the view with the new filter
                     AccountsUI.view(el);
                 };
             }

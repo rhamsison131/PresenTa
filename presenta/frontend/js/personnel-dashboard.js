@@ -9,58 +9,82 @@ window.api = async function(path, opt) {
     }
 };
 
-// --- 2. ACCOUNT VERIFICATIONS UI (Matches your backend) ---
+// --- 2. ACCOUNT VERIFICATIONS UI ---
 const AccountsUI = {
     async view(el) {
         el.innerHTML = '<div class="loading">Loading accounts...</div>';
         try {
-            // Fetch both students and orgs using your exact backend routes
             const students = await api('/api/verify/students');
             const orgs = await api('/api/verify/orgs');
 
-            // Filter for pending items
-            const pendingStudents = students.filter(s => s.status === 'pending' || s.status === 'active'); 
-            const pendingOrgs = orgs.filter(o => o.status === 'pending');
+            // Keep ONLY students that are NOT active (so they disappear once approved)
+            const displayStudents = students.filter(s => s.status !== 'active'); 
+            
+            // Show orgs that are pending or not accredited
+            const displayOrgs = orgs.filter(o => o.status !== 'accredited');
 
-            const studentRows = pendingStudents.map(u => `
+            const studentRows = displayStudents.map(u => `
                 <tr>
                     <td><b>${esc(u.name)}</b><small>${esc(u.email)}</small></td>
                     <td>${esc(u.student_id || '—')}<small>${esc(u.course || '')}</small></td>
                     <td>${esc(u.department || '—')}<small>Year ${esc(u.year || '—')}</small></td>
-                    <td>${chip(u.status === 'pending' ? 'warn' : 'ok', u.status)}</td>
+                    <td>${chip(u.status === 'pending' ? 'warn' : u.status === 'rejected' ? 'danger' : 'ok', u.status)}</td>
                     <td>
                         <div class="btns">
-                            <button class="btn sm" onclick="AccountsUI.verifyStudent('${esc(u.id)}', 'approve')">Approve</button>
-                            <button class="btn sm ghost" onclick="AccountsUI.verifyStudent('${esc(u.id)}', 'hold')">Hold</button>
-                            <button class="btn sm danger" onclick="AccountsUI.verifyStudent('${esc(u.id)}', 'reject')">Reject</button>
+                            ${u.status === 'rejected' 
+                                ? `<button class="btn sm" onclick="AccountsUI.verifyStudent('${esc(u.id)}', 'approve')">Approve</button>`
+                                : `<button class="btn sm" onclick="AccountsUI.verifyStudent('${esc(u.id)}', 'approve')">Approve</button>
+                                   <button class="btn sm ghost" onclick="AccountsUI.verifyStudent('${esc(u.id)}', 'hold')">Hold</button>
+                                   <button class="btn sm danger" onclick="AccountsUI.verifyStudent('${esc(u.id)}', 'reject')">Reject</button>`
+                            }
                         </div>
                     </td>
                 </tr>
             `).join('');
 
-            const orgRows = pendingOrgs.map(o => `
+            const orgRows = displayOrgs.map(o => `
                 <tr>
                     <td><b>${esc(o.name)}</b><small>${esc(o.department || 'University-wide')}</small></td>
                     <td>${o.officers.length} Officer(s)<small>${o.officers.map(x => x.name).join(', ')}</small></td>
                     <td>${chip(o.status === 'accredited' ? 'ok' : 'warn', o.status)}</td>
                     <td>
                         <div class="btns">
-                            <button class="btn sm" onclick="AccountsUI.verifyOrg('${esc(o.id)}', 'accredit')">Accredit</button>
-                            <button class="btn sm danger" onclick="AccountsUI.verifyOrg('${esc(o.id)}', 'not_accredited')">Reject</button>
+                            ${o.status === 'accredited'
+                                ? `<span class="chip ok">Accredited</span>`
+                                : `<button class="btn sm" onclick="AccountsUI.verifyOrg('${esc(o.id)}', 'accredit')">Accredit</button>
+                                   <button class="btn sm danger" onclick="AccountsUI.verifyOrg('${esc(o.id)}', 'not_accredited')">Reject</button>`
+                            }
                         </div>
                     </td>
                 </tr>
             `).join('');
 
+            // If approved, show the green chip instead of the list (optional, but cleaner)
+            const approvedStudents = students.filter(s => s.status === 'active');
+            const approvedStudentRows = approvedStudents.map(u => `
+                <tr>
+                    <td><b>${esc(u.name)}</b><small>${esc(u.email)}</small></td>
+                    <td>${esc(u.student_id || '—')}</td>
+                    <td>${esc(u.department || '—')}</td>
+                    <td>${chip('ok', 'Active')}</td>
+                    <td><span class="chip ok">Approved</span></td>
+                </tr>
+            `).join('');
+
             el.innerHTML = `
                 <div class="card">
-                    <div class="toolbar"><h3 style="margin:0">Student Accounts</h3></div>
-                    ${pendingStudents.length ? tableHtml(['Student', 'ID / Course', 'Department', 'Status', 'Actions'], [studentRows]) : '<div class="empty">No students to verify.</div>'}
+                    <div class="toolbar"><h3 style="margin:0">Pending Student Accounts</h3></div>
+                    ${displayStudents.length ? tableHtml(['Student', 'ID / Course', 'Department', 'Status', 'Actions'], [studentRows]) : '<div class="empty">No pending students to verify.</div>'}
                 </div>
                 <div class="card">
                     <div class="toolbar"><h3 style="margin:0">Organization Accreditation</h3></div>
-                    ${pendingOrgs.length ? tableHtml(['Organization', 'Officers', 'Status', 'Actions'], [orgRows]) : '<div class="empty">No organizations to verify.</div>'}
+                    ${displayOrgs.length ? tableHtml(['Organization', 'Officers', 'Status', 'Actions'], [orgRows]) : '<div class="empty">No organizations to verify.</div>'}
                 </div>
+                ${approvedStudents.length ? `
+                <div class="card">
+                    <div class="toolbar"><h3 style="margin:0">Approved Students</h3></div>
+                    ${tableHtml(['Student', 'ID', 'Department', 'Status', 'Result'], [approvedStudentRows])}
+                </div>` : ''}
             `;
 
         } catch (err) {

@@ -258,7 +258,6 @@ function paintUser() {
   const u = Session.user;
   $('#avatar').textContent = (u.name || '?').charAt(0).toUpperCase();
   $('#whoName').textContent = u.name;
-  // Organization officers see their organization's name; everyone else sees their role.
   $('#whoSub').textContent = (u.role === 'organization' && u.org_name) || ROLE_LABEL[u.role] || '';
 }
 
@@ -367,7 +366,6 @@ async function profileView(el) {
   };
 }
 
-// Asks SAO staff to write a message that is sent to the user / organization along with their decision.
 function decisionBox(opt) {
   return new Promise((resolve) => {
     const o = document.createElement('div');
@@ -388,7 +386,6 @@ function decisionBox(opt) {
   });
 }
 
-// Free-form message from SAO personnel to a user or every officer of an organization.
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-msg]');
   if (b) Msg.open(b.dataset.msg, b.dataset.id, b.dataset.name, b.dataset.sub);
@@ -501,7 +498,7 @@ const FeesUI = {
       free_fee: $('#fsFree').value,
       wallet_name: $('#fsName').value,
       wallet_number: $('#fsNumber').value,
-      wallet_qr: FeesUI.qr
+      wallet_qr: $('#fsQrUrl').value // Grab the URL
     };
     const r = await run(btn, () => api('/api/settings', { method: 'PUT', body }), 'Fees and wallet saved');
     if (r) refresh();
@@ -518,6 +515,7 @@ const FeesUI = {
     FeesUI.qr = s.wallet_qr || '';
     const verified = pays.filter((p) => p.payment_status === 'verified');
     const total = verified.reduce((n, p) => n + Number(p.amount), 0);
+    
     el.innerHTML = tilesHtml([['Paid event fee', s.paid_rate + '%'], ['Free event fee', '₱' + s.free_fee], ['Verified payments', verified.length], ['Total verified', '₱' + total.toFixed(2)]]) +
       `<div class="split2"><div class="card"><h3>Fee rates</h3><div class="form-grid">
         <div class="f"><label>Paid event fee (% of expected ticket sales)</label><input id="fsRate" type="number" min="0" max="100" step="0.1" value="${esc(s.paid_rate)}"></div>
@@ -526,32 +524,38 @@ const FeesUI = {
       <div class="card"><h3>Payment wallet</h3><div class="form-grid">
         <div class="f"><label>Account name</label><input id="fsName" value="${esc(s.wallet_name)}"></div>
         <div class="f"><label>Account number</label><input id="fsNumber" value="${esc(s.wallet_number)}"></div>
-        <div class="f full"><label>Wallet QR code image</label><input id="fsQr" type="file" accept="image/*"></div></div>
-        <div style="margin-top:12px"><img id="fsPrev" alt="Wallet QR" style="max-width:200px;border-radius:12px;border:1px solid var(--line);${s.wallet_qr ? '' : 'display:none'}" src="${esc(s.wallet_qr)}"></div></div></div>
+        
+        <!-- NEW: URL INPUT INSTEAD OF FILE UPLOAD -->
+        <div class="f full"><label>Wallet QR code Image URL</label><input id="fsQrUrl" placeholder="https://example.com/qr.png" value="${esc(s.wallet_qr)}"></div></div>
+        
+        <div style="margin-top:12px">
+            <img id="fsPrev" alt="Wallet QR" style="max-width:200px;border-radius:12px;border:1px solid var(--line);${s.wallet_qr ? '' : 'display:none'}" src="${esc(s.wallet_qr)}">
+        </div>
+      </div></div>
+      
       <div class="page-actions"><button class="btn big" id="fsSave">Save fees and wallet</button></div>
       <div class="card"><h3>Event payments</h3>${pays.length ? tableHtml(['Event', 'Organization', 'Type', 'Amount', 'Reference', 'Paid on', 'Status', ''], pays.map((p) => `<tr>
         <td><b>${esc(p.title)}</b><small>${esc(label(p.event_status))}</small></td><td>${esc(p.org_name)}</td><td>${p.is_paid ? 'Paid · ₱' + esc(p.ticket_price) + ' × ' + esc(p.seat_limit) : 'Free'}</td>
         <td>₱${esc(p.amount)}</td><td>${esc(p.reference)}${p.payer ? '<small>' + esc(p.payer) + '</small>' : ''}</td><td>${esc(fmtDT(p.submitted_at))}</td>
         <td>${chip(p.payment_status === 'verified' ? 'ok' : p.payment_status === 'rejected' ? 'bad' : 'warn', label(p.payment_status))}</td>
         <td><button class="btn sm ghost" data-msg="org" data-id="${esc(p.org_id)}" data-name="${esc(p.org_name)}" data-sub="${esc('Payment for "' + p.title + '"')}">Message</button></td></tr>`)) : '<div class="empty">No payments yet</div>'}</div>`;
-    $('#fsQr', el).onchange = (e) => {
-      const f = e.target.files[0];
-      if (!f) return;
-      if (f.size > 2000000) {
-        e.target.value = '';
-        return toast('Image must be under 2 MB', 'err');
+    
+    // NEW: Preview image when URL is typed
+    $('#fsQrUrl', el).oninput = (e) => {
+      FeesUI.qr = e.target.value.trim();
+      const prev = $('#fsPrev', el);
+      if (FeesUI.qr) {
+        prev.src = FeesUI.qr;
+        prev.style.display = '';
+      } else {
+        prev.style.display = 'none';
       }
-      const rd = new FileReader();
-      rd.onload = () => {
-        FeesUI.qr = rd.result;
-        $('#fsPrev', el).src = rd.result;
-        $('#fsPrev', el).style.display = '';
-      };
-      rd.readAsDataURL(f);
     };
+    
     $('#fsSave', el).onclick = (e) => FeesUI.save(e.target);
   }
 };
+
 // Mobile: tables turn into stacked cards, so every cell needs its column name.
 (function () {
   let queued = false;

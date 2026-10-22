@@ -238,7 +238,6 @@ const mount = (app) => {
     res.json(out);
   }));
 
-  // FIXED: Ensure save is awaited before sending response
   app.post('/api/events', ...orgAccess, wrap(async (req, res) => {
     const blocked = orgGate(req.user);
     if (blocked) return res.status(403).json({ message: blocked });
@@ -256,12 +255,11 @@ const mount = (app) => {
       created_at: db.now()
     };
     db.data.events.push(e);
-    await db.save(); // Crucial: Wait for save to complete
+    await db.save();
     db.log(req.user, 'event_create', e.title + ' (draft)');
     res.status(201).json(present(e, req.user));
   }));
 
-  // FIXED: Ensure save is awaited
   app.put('/api/events/:id', ...orgAccess, wrap(async (req, res) => {
     const e = findEvent(req, res, 'own');
     if (!e) return;
@@ -287,7 +285,6 @@ const mount = (app) => {
     res.json(present(e, req.user));
   }));
 
-  // FIXED: Ensure save is awaited
   app.post('/api/events/:id/submit', ...orgAccess, wrap(async (req, res) => {
     const e = findEvent(req, res, 'own');
     if (!e) return;
@@ -325,6 +322,7 @@ const mount = (app) => {
     res.json(db.data.settings);
   });
 
+  // UPDATED: Accept URL instead of base64 to prevent size limits
   app.put('/api/settings', authenticate, requirePriv('manage_subscriptions'), wrap(async (req, res) => {
     const b = req.body || {};
     const st = db.data.settings;
@@ -341,10 +339,11 @@ const mount = (app) => {
     if (b.wallet_name !== undefined) st.wallet_name = clean(b.wallet_name);
     if (b.wallet_number !== undefined) st.wallet_number = clean(b.wallet_number);
     if (b.wallet_qr !== undefined) {
-      const q = String(b.wallet_qr);
-      if (q && (!/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(q) || q.length > 3000000)) {
-        return res.status(400).json({ message: 'Upload a valid QR image under 2 MB' });
+      const q = String(b.wallet_qr).trim();
+      if (q && !/^https?:\/\//.test(q) && !/^data:image\//.test(q)) {
+        return res.status(400).json({ message: 'Provide a valid image URL' });
       }
+      if (q.length > 2000000) return res.status(400).json({ message: 'Image URL is too long' });
       st.wallet_qr = q;
     }
     await db.save();
@@ -382,7 +381,6 @@ const mount = (app) => {
     res.json(list);
   }));
 
-  // FIXED: Ensure save is awaited
   app.post('/api/events/:id/approval', authenticate, requirePriv('approve_events'), wrap(async (req, res) => {
     const e = db.data.events.find((x) => x.id === req.params.id);
     if (!e) return res.status(404).json({ message: 'Event not found' });
@@ -413,7 +411,6 @@ const mount = (app) => {
     res.json({ message: decision === 'approve' ? 'Event approved' : 'Event disapproved', event: present(e, req.user) });
   }));
 
-  // FIXED: Ensure save is awaited
   app.post('/api/events/:id/registration', ...orgAccess, wrap(async (req, res) => {
     const e = findEvent(req, res, 'own');
     if (!e) return;
@@ -424,7 +421,6 @@ const mount = (app) => {
     res.json(present(e, req.user));
   }));
 
-  // FIXED: Ensure save is awaited and this route is CLEARLY not called on creation
   app.delete('/api/events/:id', ...orgAccess, wrap(async (req, res) => {
     const e = findEvent(req, res, 'own');
     if (!e) return;
@@ -455,7 +451,6 @@ const mount = (app) => {
     res.json({ code, image });
   }));
 
-  // FIXED: Ensure save is awaited
   app.post('/api/events/:id/register', authenticate, requireRole('student'), wrap(async (req, res) => {
     const e = db.data.events.find((x) => x.id === req.params.id && x.status === 'published');
     const u = req.user;
@@ -485,7 +480,6 @@ const mount = (app) => {
     res.status(201).json({ message: 'Seat ' + seat + ' confirmed', registration: reg });
   }));
 
-  // FIXED: Ensure save is awaited
   app.delete('/api/events/:id/register', authenticate, requireRole('student'), wrap(async (req, res) => {
     const e = db.data.events.find((x) => x.id === req.params.id);
     const reg = db.data.registrations.find((r) => r.event_id === req.params.id && r.student_id === req.user.id && r.status === 'reserved');
@@ -512,7 +506,6 @@ const mount = (app) => {
     res.json(out);
   }));
 
-  // FIXED: Ensure save is awaited
   app.post('/api/attendance/scan', authenticate, requireRole('student'), wrap(async (req, res) => {
     const reject = (message, status) => res.status(status || 400).json({ valid: false, message });
     const parts = clean(req.body && req.body.code).split('|');
@@ -539,7 +532,6 @@ const mount = (app) => {
     res.json({ valid: true, message: 'Attendance recorded', attended_at: reg.attended_at, monitor_until: new Date(t + ATTEND_WINDOW_MS).toISOString(), event: { id: e.id, title: e.title, venue: e.venue } });
   }));
 
-  // FIXED: Ensure save is awaited
   app.post('/api/attendance/ping', authenticate, requireRole('student'), wrap(async (req, res) => {
     const e = db.data.events.find((x) => x.id === clean(req.body && req.body.event_id));
     const here = geoIn(req.body);
@@ -556,7 +548,6 @@ const mount = (app) => {
     res.json({ active: false, left: true, message });
   }));
 
-  // FIXED: Ensure save is awaited
   app.post('/api/events/:id/report', ...orgAccess, wrap(async (req, res) => {
     const e = findEvent(req, res, 'own');
     if (!e) return;

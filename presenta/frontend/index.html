@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Presenta</title>
+<link rel="icon" href="logo.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="landing">
+  <div class="mark"></div>
+  <h1>Presenta</h1>
+  <p>Discover campus events, reserve your seat, and confirm attendance with a single QR scan.</p>
+  <div class="actions">
+    <a href="login.html" class="btn-primary">Log in</a>
+    <a href="login.html?register=true" class="btn-light">Sign up</a>
+  </div>
+</div>
+<script>
+  const t = localStorage.getItem('token');
+  const u = JSON.parse(localStorage.getItem('user') || 'null');
+  const map = { student: 'student-dashboard.html', organization: 'org-dashboard.html', personnel: 'personnel-dashboard.html', superadmin: 'superadmin-dashboard.html' };
+  if (t && u && map[u.role]) location.replace(map[u.role]);
+</script>
+</body>
+</html>

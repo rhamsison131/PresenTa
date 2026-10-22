@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Presenta - Sign in</title>
+<link rel="icon" href="logo.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="split">
+  <div class="brand-side">
+    <div>
+      <h1>PRESENTA</h1>
+      <p>Reserve seats, scan to confirm attendance, and keep every event record in one place.</p>
+    </div>
+    <div class="qr-stage" aria-hidden="true">
+      <div class="qr-glow"></div>
+      <div class="qr-float">
+        <div class="qr-cube" id="qrCube"><div class="qr-face qr-front" id="qrFront"><i class="qr-scan"></i></div><div class="qr-face qr-back" id="qrBack"></div></div>
+      </div>
+      <div class="qr-floor"></div>
+      <span class="qr-tag">Scan &middot; Check in &middot; Done</span>
+    </div>
+    <small>© 2026 Presenta. All rights reserved.</small>
+  </div>
+  <div class="form-side">
+    <div class="logo"></div>
+
+    <div class="auth-box" id="loginBox">
+      <h2>Welcome back</h2>
+      <p class="sub">No account yet? <a data-show="registerBox">Create one</a></p>
+      <div class="msg err hidden" id="loginMsg"></div>
+      <form id="loginForm">
+        <div class="field"><label>Email or username</label><input id="loginEmail" autocomplete="username" required></div>
+        <div class="field"><label>Password</label><input type="password" id="loginPassword" autocomplete="current-password" required></div>
+        <div class="link-row"><a data-show="forgotBox">Forgot password?</a></div>
+        <button type="submit" class="btn-primary">Log in</button>
+      </form>
+    </div>
+
+    <div class="auth-box hidden" id="registerBox">
+      <h2>Create account</h2>
+      <p class="sub">Already registered? <a data-show="loginBox">Log in</a>. New accounts are verified by SAO before first use.</p>
+      <div class="msg err hidden" id="registerMsg"></div>
+      <form id="registerForm">
+        <div class="field"><label>I am a</label>
+          <select id="regRole"><option value="student">Student</option><option value="organization">Organization officer</option></select>
+        </div>
+        <div class="field"><label>Full name</label><input id="regName" required></div>
+        <div class="field"><label>Email</label><input type="email" id="regEmail" required></div>
+        <div class="field"><label>Password</label><input type="password" id="regPassword" minlength="6" required></div>
+        <div id="studentFields">
+          <div class="field"><label>Student ID number</label><input id="regSid"></div>
+          <div class="row2">
+            <div class="field"><label>Department</label><select id="regDept"></select></div>
+            <div class="field"><label>Course</label><input id="regCourse" placeholder="e.g. BSIT"></div>
+          </div>
+          <div class="field"><label>Year level</label><select id="regYear"></select></div>
+          <div class="field"><label>Organization (optional)</label><select id="regMember"></select></div>
+        </div>
+        <div id="orgFields" class="hidden">
+          <div class="field"><label>Organization name</label><input id="regOrg"></div>
+          <div class="field"><label>Organization department</label><select id="regOrgDept"></select></div>
+          <div class="field"><label>Position</label><input id="regPos" placeholder="e.g. President"></div>
+        </div>
+        <button type="submit" class="btn-primary">Sign up</button>
+      </form>
+    </div>
+
+    <div class="auth-box hidden" id="forgotBox">
+      <h2>Reset password</h2>
+      <p class="sub">Enter your email to get a reset code. <a data-show="loginBox">Back to login</a></p>
+      <div class="msg hidden" id="forgotMsg"></div>
+      <form id="forgotForm">
+        <div class="field"><label>Email</label><input type="email" id="forgotEmail" required></div>
+        <button type="submit" class="btn-primary">Send code</button>
+      </form>
+      <form id="resetForm" class="hidden" style="margin-top:18px">
+        <div class="field"><label>6-digit code</label><input id="resetCode" inputmode="numeric" maxlength="6" required></div>
+        <div class="field"><label>New password</label><input type="password" id="resetPassword" minlength="6" required></div>
+        <button type="submit" class="btn-primary">Update password</button>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+/* 3D rotating QR code (decorative, no libraries) */
+(function () {
+  var N = 25, seed = 20261022;
+  function rnd() { seed |= 0; seed = seed + 0x6D2B79F5 | 0; var t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }
+  var g = [], r, c;
+  for (r = 0; r < N; r++) { g[r] = []; for (c = 0; c < N; c++) g[r][c] = rnd() > 0.52; }
+  function finder(r0, c0) {
+    for (var r = -1; r <= 7; r++) for (var c = -1; c <= 7; c++) {
+      var rr = r0 + r, cc = c0 + c;
+      if (rr < 0 || cc < 0 || rr >= N || cc >= N) continue;
+      var on = r >= 0 && r <= 6 && c >= 0 && c <= 6 && (r === 0 || r === 6 || c === 0 || c === 6 || (r >= 2 && r <= 4 && c >= 2 && c <= 4));
+      g[rr][cc] = on;
+    }
+  }
+  finder(0, 0); finder(0, N - 7); finder(N - 7, 0);
+  for (var i = 8; i < N - 8; i++) { g[6][i] = g[i][6] = i % 2 === 0; }
+  for (r = N - 9; r < N - 4; r++) for (c = N - 9; c < N - 4; c++) { var d = Math.max(Math.abs(r - (N - 7)), Math.abs(c - (N - 7))); g[r][c] = d !== 1; }
+  var m = (N - 1) / 2; // clear the middle for the logo
+  for (r = m - 2; r <= m + 2; r++) for (c = m - 2; c <= m + 2; c++) g[r][c] = false;
+  var cells = '';
+  for (r = 0; r < N; r++) for (c = 0; c < N; c++) if (g[r][c]) cells += '<rect x="' + c + '" y="' + r + '" width="1.04" height="1.04" rx=".18"/>';
+  var svg = '<svg viewBox="-2 -2 ' + (N + 4) + ' ' + (N + 4) + '" xmlns="http://www.w3.org/2000/svg"><g fill="#030164">' + cells + '</g><rect x="' + (m - 2) + '" y="' + (m - 2) + '" width="5" height="5" rx="1.2" fill="#030164"/><image href="logo.png" x="' + (m - 1.9) + '" y="' + (m - 1.9) + '" width="3.8" height="3.8"/></svg>';
+  var front = document.getElementById('qrFront'), back = document.getElementById('qrBack'), cube = document.getElementById('qrCube');
+  if (!front) return;
+  front.insertAdjacentHTML('afterbegin', svg);
+  back.innerHTML = svg;
+  for (var k = -6; k <= 6; k += 2) { // card thickness
+    var e = document.createElement('div');
+    e.className = 'qr-face qr-edge';
+    e.style.transform = 'translateZ(' + k + 'px)';
+    cube.insertBefore(e, back);
+  }
+})();
+</script>
+<script src="js/auth.js"></script>
+</body>
+</html>

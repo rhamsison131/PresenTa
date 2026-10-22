@@ -60,6 +60,25 @@ const findOrCreateOrg = (name, department) => {
   return org;
 };
 
+const confirmed = async (u) => {
+  if (u.email_verified !== false || !u.supabase_id) return false;
+  try {
+    const { data, error } = await db.supabase.auth.admin.getUserById(u.supabase_id);
+    if (!error && data && data.user && data.user.email_confirmed_at) {
+      u.email_verified = true;
+      u.email_verified_at = db.now();
+      return true;
+    }
+  } catch (e) {}
+  return false;
+};
+
+const syncVerified = async () => {
+  const list = db.data.users.filter((u) => u.email_verified === false && u.supabase_id);
+  const res = await Promise.all(list.map(confirmed));
+  if (res.some(Boolean)) await db.save();
+};
+
 const publicOrgs = () =>
   db.data.orgs
     .filter((o) => o.status === 'accredited' && !o.suspended)
@@ -114,14 +133,27 @@ const register = wrap(async (req, res) => {
     user.department = '';
   }
 
+  const base = (process.env.APP_URL || '').replace(/\/$/, '');
+  const { data: sg, error: sgErr } = await db.supabase.auth.signUp({
+    email,
+    password,
+    options: base ? { emailRedirectTo: base + '/login.html' } : {}
+  });
+  if (sgErr) return res.status(400).json({ message: sgErr.message });
+  if (!sg.user || !sg.user.identities || !sg.user.identities.length) {
+    return res.status(400).json({ message: 'Email is already registered' });
+  }
+  user.supabase_id = sg.user.id;
+  user.email_verified = false;
+
   db.data.users.push(user);
-  await db.save(); // FIXED: Wait for save to complete
+  await db.save();
   db.log(user, 'register', role + ' account created: ' + email);
-  res.status(201).json({ message: 'Registered. Your account is waiting for SAO verification.' });
+  res.status(201).json({ message: 'Registered. Confirm your email using the link sent to your Gmail. After that, SAO will verify your account.' });
 });
 
 const login = wrap(async (req, res) => {
-  await db.ready; // FIXED: Force latest data load
+  await db.ready;
   
   const user = db.findUser(req.body && req.body.email);
   const password = String((req.body && req.body.password) || '');
@@ -130,12 +162,19 @@ const login = wrap(async (req, res) => {
     return res.status(401).json({ message: 'Invalid credentials' });
   }
   
+  if (user.email_verified === false) {
+    if (await confirmed(user)) await db.save();
+    if (user.email_verified === false) {
+      return res.status(403).json({ message: 'Please confirm your email first. Check your Gmail inbox.', code: 'EMAIL_UNCONFIRMED' });
+    }
+  }
+
   if (user.status === 'pending') return res.status(403).json({ message: 'Your account is waiting for SAO verification.' });
   if (user.status === 'rejected') return res.status(403).json({ message: 'Your account was rejected by SAO.' });
   if (user.status === 'suspended') return res.status(403).json({ message: 'Your account is suspended.' });
   
   db.log(user, 'login', 'Signed in');
-  await db.save(); // FIXED: Wait for log to save
+  await db.save();
   res.json({ token: sign(user), user: db.pub(user), redirectUrl: REDIRECT[user.role] });
 });
 
@@ -224,6 +263,13 @@ const mount = (app) => {
   app.get('/api/public/orgs', (req, res) => res.json(publicOrgs()));
   app.post('/api/register', register);
   app.post('/api/login', login);
+  app.post('/api/auth/resend', wrap(async (req, res) => {
+    const u = db.findUser(req.body && req.body.email);
+    if (u && u.email_verified === false) {
+      await db.supabase.auth.resend({ type: 'signup', email: u.email });
+    }
+    res.json({ message: 'If the account is waiting for confirmation, a new email was sent.' });
+  }));
   app.post('/api/auth/forgot', forgot);
   app.post('/api/auth/reset', reset);
   app.get('/api/me', authenticate, (req, res) => res.json({ user: db.pub(req.user) }));
@@ -262,4 +308,4 @@ const seed = async () => {
   console.log('Super admin created: ' + email);
 };
 
-module.exports = { mount, seed, authenticate, requireRole, requirePriv, wrap, clean, findOrCreateOrg };
+module.exports = { mount, seed, authenticate, requireRole, requirePriv, wrap, clean, findOrCreateOrg, syncVerified };

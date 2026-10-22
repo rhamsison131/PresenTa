@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const db = require('./db');
-const { authenticate, requireRole, requirePriv, wrap, clean, findOrCreateOrg } = require('./auth');
+const { authenticate, requireRole, requirePriv, wrap, clean, findOrCreateOrg, syncVerified } = require('./auth');
 
 const ROLES = ['student', 'organization', 'personnel', 'superadmin'];
 const addYear = () => {
@@ -19,13 +19,15 @@ const mount = (app) => {
   const subscriber = [authenticate, requirePriv('manage_subscriptions')];
   const superOnly = [authenticate, requireRole('superadmin')];
 
-  app.get('/api/verify/students', ...verifier, (req, res) => {
-    res.json(db.data.users.filter((u) => u.role === 'student').map(db.pub).reverse());
-  });
+  app.get('/api/verify/students', ...verifier, wrap(async (req, res) => {
+    await syncVerified();
+    res.json(db.data.users.filter((u) => u.role === 'student' && u.email_verified !== false).map(db.pub).reverse());
+  }));
 
   app.post('/api/verify/students/:id', ...verifier, wrap(async (req, res) => {
     const u = db.data.users.find((x) => x.id === req.params.id && x.role === 'student');
     if (!u) return res.status(404).json({ message: 'Student not found' });
+    if (u.email_verified === false) return res.status(400).json({ message: 'Student has not confirmed their email yet' });
     const map = { approve: 'active', hold: 'pending', reject: 'rejected' };
     const decision = req.body && req.body.decision;
     if (!map[decision]) return res.status(400).json({ message: 'Invalid decision' });
@@ -34,7 +36,7 @@ const mount = (app) => {
     if (decision !== 'approve' && !note) return res.status(400).json({ message: 'Write a message for the student explaining this decision' });
     
     u.status = map[decision];
-    await db.save(); // FIXED: Wait for save to complete
+    await db.save();
     db.log(req.user, 'student_' + decision, u.email + (note ? ' | message: ' + note : ''));
     
     const text = {
@@ -46,9 +48,15 @@ const mount = (app) => {
     res.json({ message: 'Student ' + ({ approve: 'approved', hold: 'put on hold', reject: 'rejected' })[decision], user: db.pub(u) });
   }));
 
-  app.get('/api/verify/orgs', ...verifier, (req, res) => {
-    res.json(db.data.orgs.map(orgView).reverse());
-  });
+  app.get('/api/verify/orgs', ...verifier, wrap(async (req, res) => {
+    await syncVerified();
+    res.json(
+      db.data.orgs
+        .filter((o) => officersOf(o.id).some((u) => u.email_verified !== false))
+        .map(orgView)
+        .reverse()
+    );
+  }));
 
   app.post('/api/verify/orgs/:id', ...verifier, wrap(async (req, res) => {
     const o = db.data.orgs.find((x) => x.id === req.params.id);
@@ -59,10 +67,13 @@ const mount = (app) => {
     if (decision !== 'accredit' && !note) return res.status(400).json({ message: 'Write a message for the organization explaining this decision' });
     const officers = officersOf(o.id);
     if (decision === 'accredit') {
+      if (!officers.some((u) => u.email_verified !== false)) {
+        return res.status(400).json({ message: 'No officer has confirmed their email yet' });
+      }
       o.status = 'accredited';
       o.accredited_at = db.now();
       officers.forEach((u) => {
-        if (u.status === 'pending' || u.status === 'rejected') u.status = 'active';
+        if (u.email_verified !== false && (u.status === 'pending' || u.status === 'rejected')) u.status = 'active';
       });
       if (!o.subscription || o.subscription.status !== 'active') {
         o.subscription = { plan: (o.subscription && o.subscription.plan) || 'Basic', status: 'active', expires_at: addYear() };
@@ -75,7 +86,7 @@ const mount = (app) => {
         if (u.status === 'active') u.status = 'pending';
       });
     }
-    await db.save(); // FIXED: Wait for save to complete
+    await db.save();
     db.log(req.user, 'org_' + decision, o.name + (note ? ' | message: ' + note : ''));
     const msg = decision === 'accredit'
       ? 'Your organization is accredited. You can now create events.'
@@ -84,8 +95,6 @@ const mount = (app) => {
     res.json({ message: 'Organization updated', org: orgView(o) });
   }));
 
-  // ... [Rest of admin.js remains the same as the original file you provided] ...
-  
   app.get('/api/subscriptions', ...subscriber, (req, res) => {
     res.json(db.data.orgs.map(orgView).reverse());
   });

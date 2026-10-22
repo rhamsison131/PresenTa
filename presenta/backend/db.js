@@ -175,6 +175,7 @@ module.exports = {
   data,
   ready,
   reload,
+  supabase,
   save,
   flush,
   uid,

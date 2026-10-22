@@ -2,22 +2,20 @@
 const token = localStorage.getItem('token');
 const user = JSON.parse(localStorage.getItem('user') || 'null');
 
-// If there is no token, or they aren't personnel, kick them out immediately
 if (!token || !user || user.role !== 'personnel') {
     window.location.href = 'login.html';
 }
 
-// Helper function: Every time we call the API, we must include the token!
+// Helper function for API calls
 async function apiFetch(endpoint, options = {}) {
     const headers = {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`, // <--- THIS IS CRUCIAL
+        'Authorization': `Bearer ${token}`,
         ...(options.headers || {})
     };
 
     const res = await fetch(endpoint, { ...options, headers });
 
-    // If the backend says the token is invalid (401) or account is blocked (403)
     if (res.status === 401 || res.status === 403) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
@@ -28,23 +26,36 @@ async function apiFetch(endpoint, options = {}) {
     return res;
 }
 
-// --- 2. UI SETUP ---
+// --- 2. THE FIX: Stop rogue key listeners from dashboard.js ---
 document.addEventListener('DOMContentLoaded', () => {
-    // Set the user's name on the screen
+    // 1. Stop forms from reloading
+    document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', (e) => e.preventDefault());
+    });
+
+    // 2. Prevent the page from logging out on keypress (Overrides dashboard.js)
+    window.addEventListener('keydown', (e) => {
+        // If the user is typing in an input field, let them type
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+            return; 
+        }
+        // Otherwise, stop the event from bubbling up to dashboard.js
+        e.stopPropagation();
+    }, true); // The 'true' here is crucial; it catches the event before dashboard.js does
+
+    // 3. Set the user's name
     const nameEl = document.getElementById('userName');
     if (nameEl) nameEl.textContent = user.name;
     
-    // Load the data
+    // 4. Load data
     loadDashboardData();
 });
 
 async function loadDashboardData() {
     try {
-        // Fetch notifications using our secure helper
         const notifRes = await apiFetch('/api/notifications');
         const notifData = await notifRes.json();
         
-        // Example: Show unread notifications
         const unreadCount = notifData.unread || 0;
         const badge = document.getElementById('notifBadge');
         if (badge) {
@@ -52,7 +63,6 @@ async function loadDashboardData() {
             badge.style.display = unreadCount > 0 ? 'inline-block' : 'none';
         }
 
-        // Fetch profile data to make sure it's valid
         const meRes = await apiFetch('/api/me');
         const meData = await meRes.json();
         console.log("Logged in as:", meData.user.name);

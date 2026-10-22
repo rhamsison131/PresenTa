@@ -58,6 +58,7 @@ const mount = (app) => {
     const officers = officersOf(o.id);
     if (decision === 'accredit') {
       o.status = 'accredited';
+      o.accredited_at = db.now(); // <--- THIS LINE RECORDS THE APPROVAL DATE
       officers.forEach((u) => {
         if (u.status === 'pending' || u.status === 'rejected') u.status = 'active';
       });
@@ -287,8 +288,6 @@ const mount = (app) => {
     res.json({ message: start ? 'Update period saved' : 'Update period cleared', profile_window: db.data.settings.profile_window });
   }));
 
-  // SAO personnel can write a message to a user or to every officer of an organization
-  // (account verification, event approval, payment/transaction follow-ups).
   const canMessage = [authenticate, (req, res, next) =>
     ['verify_accounts', 'manage_subscriptions', 'approve_events'].some((p) => db.hasPriv(req.user, p))
       ? next()

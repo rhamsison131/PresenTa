@@ -220,7 +220,9 @@ const canSeeReport = (u, r) => {
 const mount = (app) => {
   const orgAccess = [authenticate, requireRole('organization'), requirePriv('manage_events')];
 
-  app.get('/api/events', authenticate, wrap((req, res) => {
+  app.get('/api/events', authenticate, wrap(async (req, res) => {
+    await db.ready; // FORCE SYNC WITH SUPABASE BEFORE FETCHING
+    
     const u = req.user;
     let list = db.data.events;
     if (u.role === 'student') list = list.filter((e) => e.status === 'published');
@@ -286,13 +288,9 @@ const mount = (app) => {
   }));
 
   app.post('/api/events/:id/submit', ...orgAccess, wrap(async (req, res) => {
-    // 1. FORCE A RELOAD FROM SUPABASE FIRST
     await db.ready; 
-
-    // 2. Now find the event
     const e = findEvent(req, res, 'own');
     if (!e) return;
-    
     const blocked = orgGate(req.user);
     if (blocked) return res.status(403).json({ message: blocked });
     if (!['draft', 'rejected'].includes(e.status)) return res.status(400).json({ message: 'This event cannot be submitted' });

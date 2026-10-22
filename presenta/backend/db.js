@@ -32,10 +32,14 @@ const data = {};
 let queue = Promise.resolve();
 
 const persist = async () => {
-  const { error } = await supabase
-    .from('app_state')
-    .upsert({ id: ROW_ID, data, updated_at: new Date().toISOString() });
-  if (error) console.error('Supabase save failed:', error.message);
+  try {
+    const { error } = await supabase
+      .from('app_state')
+      .upsert({ id: ROW_ID, data, updated_at: new Date().toISOString() });
+    if (error) console.error('Supabase save failed:', error.message);
+  } catch (err) {
+    console.error('Supabase save failed:', err.message);
+  }
 };
 
 const save = () => {
@@ -67,12 +71,14 @@ const normalize = () => {
 };
 
 const load = async () => {
+  await queue;
   const { data: row, error } = await supabase
     .from('app_state')
     .select('data')
     .eq('id', ROW_ID)
     .maybeSingle();
   if (error) throw new Error('Supabase load failed: ' + error.message);
+  Object.keys(data).forEach((k) => delete data[k]);
   Object.assign(data, (row && row.data) || {});
   normalize();
   if (!data.approvalMigrated) {
@@ -86,6 +92,7 @@ const load = async () => {
 
 const ready = load();
 ready.catch((err) => console.error(err.message));
+const reload = () => load();
 
 const uid = (prefix) => prefix + crypto.randomBytes(6).toString('hex');
 const now = () => new Date().toISOString();
@@ -167,6 +174,7 @@ const pub = (u) => {
 module.exports = {
   data,
   ready,
+  reload,
   save,
   flush,
   uid,

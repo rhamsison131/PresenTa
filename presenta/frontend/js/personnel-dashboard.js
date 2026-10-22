@@ -1,14 +1,3 @@
-// --- 1. SAFETY NET ---
-const originalApi = window.api;
-window.api = async function(path, opt) {
-    try {
-        return await originalApi(path, opt);
-    } catch (e) {
-        if (e.message === 'Cannot reach the server') throw e;
-        throw e;
-    }
-};
-
 // --- 2. ACCOUNT VERIFICATIONS UI ---
 const AccountsUI = {
     orgDeptFilter: '', 
@@ -171,9 +160,15 @@ document.addEventListener('DOMContentLoaded', () => {
             title: 'Overview',
             nav: 'overview',
             async render(el) {
+                const [students, orgs, approvals] = await Promise.all([
+                    api('/api/verify/students').catch(() => []),
+                    api('/api/verify/orgs').catch(() => []),
+                    api('/api/approvals').catch(() => [])
+                ]);
                 el.innerHTML = tilesHtml([
-                    ['Pending Approvals', '—'],
-                    ['System Status', 'Online']
+                    ['Pending Students', students.filter(s => s.status === 'pending').length],
+                    ['Pending Organizations', orgs.filter(o => o.status === 'pending').length],
+                    ['Pending Events', approvals.filter(e => e.status === 'pending').length]
                 ]) + `<div class="card"><h3>Welcome, ${esc(Session.user.name)}</h3><p>Use the sidebar to verify student accounts, accredit organizations, and approve events.</p></div>`;
             }
         },

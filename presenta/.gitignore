@@ -1,3 +1,4 @@
 node_modules
 backend/.env
 backend/attendance-data.json
+backend/.env.examples

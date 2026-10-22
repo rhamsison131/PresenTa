@@ -121,14 +121,19 @@ const register = wrap(async (req, res) => {
 });
 
 const login = wrap(async (req, res) => {
+  await db.ready; // FIXED: Force latest data load
+  
   const user = db.findUser(req.body && req.body.email);
   const password = String((req.body && req.body.password) || '');
+  
   if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ message: 'Invalid credentials' });
   }
+  
   if (user.status === 'pending') return res.status(403).json({ message: 'Your account is waiting for SAO verification.' });
   if (user.status === 'rejected') return res.status(403).json({ message: 'Your account was rejected by SAO.' });
   if (user.status === 'suspended') return res.status(403).json({ message: 'Your account is suspended.' });
+  
   db.log(user, 'login', 'Signed in');
   await db.save(); // FIXED: Wait for log to save
   res.json({ token: sign(user), user: db.pub(user), redirectUrl: REDIRECT[user.role] });

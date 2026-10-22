@@ -23,7 +23,7 @@ const mount = (app) => {
     res.json(db.data.users.filter((u) => u.role === 'student').map(db.pub).reverse());
   });
 
-  app.post('/api/verify/students/:id', ...verifier, wrap((req, res) => {
+  app.post('/api/verify/students/:id', ...verifier, wrap(async (req, res) => {
     const u = db.data.users.find((x) => x.id === req.params.id && x.role === 'student');
     if (!u) return res.status(404).json({ message: 'Student not found' });
     const map = { approve: 'active', hold: 'pending', reject: 'rejected' };
@@ -32,9 +32,11 @@ const mount = (app) => {
     if (u.status === 'suspended') return res.status(400).json({ message: 'Account is suspended. Restore it from the admin panel.' });
     const note = clean(req.body && req.body.note);
     if (decision !== 'approve' && !note) return res.status(400).json({ message: 'Write a message for the student explaining this decision' });
+    
     u.status = map[decision];
-    db.save();
+    await db.save(); // FIXED: Wait for save to complete
     db.log(req.user, 'student_' + decision, u.email + (note ? ' | message: ' + note : ''));
+    
     const text = {
       approve: 'Your student account is verified. You can now register for events.',
       hold: 'Your account is on hold. SAO needs more information.',
@@ -48,7 +50,7 @@ const mount = (app) => {
     res.json(db.data.orgs.map(orgView).reverse());
   });
 
-  app.post('/api/verify/orgs/:id', ...verifier, wrap((req, res) => {
+  app.post('/api/verify/orgs/:id', ...verifier, wrap(async (req, res) => {
     const o = db.data.orgs.find((x) => x.id === req.params.id);
     if (!o) return res.status(404).json({ message: 'Organization not found' });
     const decision = req.body && req.body.decision;
@@ -58,7 +60,7 @@ const mount = (app) => {
     const officers = officersOf(o.id);
     if (decision === 'accredit') {
       o.status = 'accredited';
-      o.accredited_at = db.now(); // <--- THIS LINE RECORDS THE APPROVAL DATE
+      o.accredited_at = db.now();
       officers.forEach((u) => {
         if (u.status === 'pending' || u.status === 'rejected') u.status = 'active';
       });
@@ -73,7 +75,7 @@ const mount = (app) => {
         if (u.status === 'active') u.status = 'pending';
       });
     }
-    db.save();
+    await db.save(); // FIXED: Wait for save to complete
     db.log(req.user, 'org_' + decision, o.name + (note ? ' | message: ' + note : ''));
     const msg = decision === 'accredit'
       ? 'Your organization is accredited. You can now create events.'
@@ -82,11 +84,13 @@ const mount = (app) => {
     res.json({ message: 'Organization updated', org: orgView(o) });
   }));
 
+  // ... [Rest of admin.js remains the same as the original file you provided] ...
+  
   app.get('/api/subscriptions', ...subscriber, (req, res) => {
     res.json(db.data.orgs.map(orgView).reverse());
   });
 
-  app.put('/api/subscriptions/:id', ...subscriber, wrap((req, res) => {
+  app.put('/api/subscriptions/:id', ...subscriber, wrap(async (req, res) => {
     const o = db.data.orgs.find((x) => x.id === req.params.id);
     if (!o) return res.status(404).json({ message: 'Organization not found' });
     const b = req.body || {};
@@ -95,7 +99,7 @@ const mount = (app) => {
     const expires = b.expires_at ? new Date(b.expires_at) : null;
     if (expires && isNaN(expires)) return res.status(400).json({ message: 'Invalid expiry date' });
     o.subscription = { plan, status, expires_at: expires ? expires.toISOString() : null };
-    db.save();
+    await db.save();
     db.log(req.user, 'subscription_update', o.name + ': ' + plan + ' / ' + status);
     officersOf(o.id).forEach((u) => db.notify(u.id, 'Subscription update', 'Your subscription is now ' + plan + ' (' + status + ').'));
     res.json({ message: 'Subscription saved', org: orgView(o) });
@@ -135,12 +139,12 @@ const mount = (app) => {
       user.org_id = findOrCreateOrg(orgName).id;
     }
     db.data.users.push(user);
-    db.save();
+    await db.save();
     db.log(req.user, 'user_create', email + ' as ' + role);
     res.status(201).json({ message: 'Account created', user: db.pub(user) });
   }));
 
-  app.put('/api/admin/users/:id', ...superOnly, wrap((req, res) => {
+  app.put('/api/admin/users/:id', ...superOnly, wrap(async (req, res) => {
     const u = db.data.users.find((x) => x.id === req.params.id);
     if (!u) return res.status(404).json({ message: 'User not found' });
     const b = req.body || {};
@@ -155,19 +159,19 @@ const mount = (app) => {
       u.privileges = b.privileges.filter((p) => db.ALL_PRIVS.includes(p));
       if (u.role === 'superadmin') u.privileges = db.ALL_PRIVS.slice();
     }
-    db.save();
+    await db.save();
     db.log(req.user, 'user_update', u.email + ' role=' + u.role + ' privileges=' + u.privileges.join('|'));
     res.json({ message: 'User updated', user: db.pub(u) });
   }));
 
-  app.post('/api/admin/users/:id/status', ...superOnly, wrap((req, res) => {
+  app.post('/api/admin/users/:id/status', ...superOnly, wrap(async (req, res) => {
     const u = db.data.users.find((x) => x.id === req.params.id);
     if (!u) return res.status(404).json({ message: 'User not found' });
     const status = req.body && req.body.status;
     if (!['active', 'suspended'].includes(status)) return res.status(400).json({ message: 'Invalid status' });
     if (u.id === req.user.id) return res.status(400).json({ message: 'You cannot change your own status' });
     u.status = status;
-    db.save();
+    await db.save();
     db.log(req.user, status === 'suspended' ? 'user_suspend' : 'user_restore', u.email);
     res.json({ message: status === 'suspended' ? 'Account suspended' : 'Account restored', user: db.pub(u) });
   }));
@@ -178,19 +182,19 @@ const mount = (app) => {
     const password = String((req.body && req.body.password) || '');
     if (password.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' });
     u.password = await bcrypt.hash(password, 10);
-    db.save();
+    await db.save();
     db.log(req.user, 'user_password_reset', u.email);
     res.json({ message: 'Password reset' });
   }));
 
-  app.delete('/api/admin/users/:id', ...superOnly, wrap((req, res) => {
+  app.delete('/api/admin/users/:id', ...superOnly, wrap(async (req, res) => {
     const u = db.data.users.find((x) => x.id === req.params.id);
     if (!u) return res.status(404).json({ message: 'User not found' });
     if (u.id === req.user.id) return res.status(400).json({ message: 'You cannot delete your own account' });
     db.data.users = db.data.users.filter((x) => x.id !== u.id);
     db.data.registrations = db.data.registrations.filter((r) => r.student_id !== u.id);
     db.data.notifications = db.data.notifications.filter((n) => n.user_id !== u.id);
-    db.save();
+    await db.save();
     db.log(req.user, 'user_delete', u.email);
     res.json({ message: 'Account deleted' });
   }));
@@ -199,7 +203,7 @@ const mount = (app) => {
     res.json(db.data.orgs.map(orgView).reverse());
   });
 
-  app.put('/api/admin/orgs/:id', ...superOnly, wrap((req, res) => {
+  app.put('/api/admin/orgs/:id', ...superOnly, wrap(async (req, res) => {
     const o = db.data.orgs.find((x) => x.id === req.params.id);
     if (!o) return res.status(404).json({ message: 'Organization not found' });
     const b = req.body || {};
@@ -225,12 +229,12 @@ const mount = (app) => {
       };
     }
     db.sweepAccreditation();
-    db.save();
+    await db.save();
     db.log(req.user, 'org_update', o.name + ' status=' + o.status + ' suspended=' + o.suspended);
     res.json({ message: 'Organization updated', org: orgView(o) });
   }));
 
-  app.delete('/api/admin/orgs/:id', ...superOnly, wrap((req, res) => {
+  app.delete('/api/admin/orgs/:id', ...superOnly, wrap(async (req, res) => {
     const o = db.data.orgs.find((x) => x.id === req.params.id);
     if (!o) return res.status(404).json({ message: 'Organization not found' });
     const eventIds = db.data.events.filter((e) => e.org_id === o.id).map((e) => e.id);
@@ -242,12 +246,12 @@ const mount = (app) => {
       u.org_id = null;
     });
     db.data.orgs = db.data.orgs.filter((x) => x.id !== o.id);
-    db.save();
+    await db.save();
     db.log(req.user, 'org_delete', o.name);
     res.json({ message: 'Organization deleted' });
   }));
 
-  app.post('/api/admin/users/:id/credits', ...superOnly, wrap((req, res) => {
+  app.post('/api/admin/users/:id/credits', ...superOnly, wrap(async (req, res) => {
     const u = db.data.users.find((x) => x.id === req.params.id);
     if (!u) return res.status(404).json({ message: 'User not found' });
     if (!['student', 'organization'].includes(u.role)) return res.status(400).json({ message: 'Edit credits apply to students and organization officers only' });
@@ -261,7 +265,7 @@ const mount = (app) => {
       if (n < 1) return res.status(400).json({ message: 'Enter at least 1 credit to add' });
       u.edit_credits = (u.edit_credits || 0) + n;
     }
-    db.save();
+    await db.save();
     db.log(req.user, 'edit_credits', u.email + (set ? ' set to ' : ' +') + n + ' (balance ' + u.edit_credits + ')');
     db.notify(u.id, 'Edit credits', set
       ? 'SAO set your edit credits to ' + u.edit_credits + '.'
@@ -269,7 +273,7 @@ const mount = (app) => {
     res.json({ message: 'Edit credits saved', user: db.pub(u) });
   }));
 
-  app.put('/api/admin/profile-window', ...superOnly, wrap((req, res) => {
+  app.put('/api/admin/profile-window', ...superOnly, wrap(async (req, res) => {
     const b = req.body || {};
     const start = b.start ? new Date(b.start) : null;
     const end = b.end ? new Date(b.end) : null;
@@ -277,7 +281,7 @@ const mount = (app) => {
     if (Boolean(start) !== Boolean(end)) return res.status(400).json({ message: 'Set both the opening and closing date, or clear both' });
     if (start && end <= start) return res.status(400).json({ message: 'The closing date must be after the opening date' });
     db.data.settings.profile_window = { start: start ? start.toISOString() : '', end: end ? end.toISOString() : '' };
-    db.save();
+    await db.save();
     const fmt = (d) => d.toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' });
     db.log(req.user, 'profile_window', start ? fmt(start) + ' to ' + fmt(end) : 'cleared');
     if (start) {
@@ -293,7 +297,7 @@ const mount = (app) => {
       ? next()
       : res.status(403).json({ message: 'Not allowed' })];
 
-  app.post('/api/messages', ...canMessage, wrap((req, res) => {
+  app.post('/api/messages', ...canMessage, wrap(async (req, res) => {
     const b = req.body || {};
     const message = clean(b.message);
     const subject = clean(b.subject) || 'Message from SAO';

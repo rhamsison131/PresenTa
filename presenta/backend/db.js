@@ -1,9 +1,8 @@
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
+const { createClient } = require('@supabase/supabase-js');
 const mailer = require('./mailer');
 
-const FILE = path.join(__dirname, 'attendance-data.json');
+const ROW_ID = 'main';
 const COLLECTIONS = ['users', 'orgs', 'events', 'registrations', 'notifications', 'reports', 'logs'];
 const ALL_PRIVS = ['verify_accounts', 'manage_subscriptions', 'monitor_events', 'view_reports', 'manage_events', 'approve_events'];
 const DEPARTMENTS = [
@@ -25,36 +24,68 @@ const DEFAULT_PRIVS = {
   superadmin: ALL_PRIVS.slice()
 };
 
-let data = {};
-try {
-  data = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-} catch (err) {
-  data = {};
-}
-COLLECTIONS.forEach((k) => {
-  if (!Array.isArray(data[k])) data[k] = [];
-});
-if (!data.settings || typeof data.settings !== 'object') data.settings = {};
-data.settings = { wallet_name: '', wallet_number: '', wallet_qr: '', paid_rate: 5, free_fee: 100, profile_window: { start: '', end: '' }, ...data.settings };
-data.users.forEach((u) => {
-  u.email = String(u.email || '').toLowerCase();
-  if (!Array.isArray(u.privileges)) u.privileges = (DEFAULT_PRIVS[u.role] || []).slice();
-  if (!u.status) u.status = 'active';
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, {
+  auth: { persistSession: false }
 });
 
-const save = () => {
-  const tmp = FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, FILE);
+const data = {};
+let queue = Promise.resolve();
+
+const persist = async () => {
+  const { error } = await supabase
+    .from('app_state')
+    .upsert({ id: ROW_ID, data, updated_at: new Date().toISOString() });
+  if (error) console.error('Supabase save failed:', error.message);
 };
 
-if (!data.approvalMigrated) {
-  data.users.forEach((u) => {
-    if (u.role === 'personnel' && !u.privileges.includes('approve_events')) u.privileges.push('approve_events');
+const save = () => {
+  queue = queue.then(persist);
+  return queue;
+};
+
+const flush = () => queue;
+
+const normalize = () => {
+  COLLECTIONS.forEach((k) => {
+    if (!Array.isArray(data[k])) data[k] = [];
   });
-  data.approvalMigrated = true;
-  save();
-}
+  if (!data.settings || typeof data.settings !== 'object') data.settings = {};
+  data.settings = {
+    wallet_name: '',
+    wallet_number: '',
+    wallet_qr: '',
+    paid_rate: 5,
+    free_fee: 100,
+    profile_window: { start: '', end: '' },
+    ...data.settings
+  };
+  data.users.forEach((u) => {
+    u.email = String(u.email || '').toLowerCase();
+    if (!Array.isArray(u.privileges)) u.privileges = (DEFAULT_PRIVS[u.role] || []).slice();
+    if (!u.status) u.status = 'active';
+  });
+};
+
+const load = async () => {
+  const { data: row, error } = await supabase
+    .from('app_state')
+    .select('data')
+    .eq('id', ROW_ID)
+    .maybeSingle();
+  if (error) throw new Error('Supabase load failed: ' + error.message);
+  Object.assign(data, (row && row.data) || {});
+  normalize();
+  if (!data.approvalMigrated) {
+    data.users.forEach((u) => {
+      if (u.role === 'personnel' && !u.privileges.includes('approve_events')) u.privileges.push('approve_events');
+    });
+    data.approvalMigrated = true;
+    await save();
+  }
+};
+
+const ready = load();
+ready.catch((err) => console.error(err.message));
 
 const uid = (prefix) => prefix + crypto.randomBytes(6).toString('hex');
 const now = () => new Date().toISOString();
@@ -78,7 +109,6 @@ const log = (actor, action, detail) => {
   save();
 };
 
-// Appends the SAO personnel's own message (if any) to a system notification text.
 const withNote = (text, note, by) => {
   const n = String(note || '').trim();
   return n ? text + '\n\nMessage from ' + (by ? by.name : 'SAO') + ': ' + n : text;
@@ -134,4 +164,23 @@ const pub = (u) => {
   };
 };
 
-module.exports = { data, save, uid, now, findUser, hasPriv, log, notify, withNote, pub, windowState, sweepAccreditation, ALL_PRIVS, DEFAULT_PRIVS, DEPARTMENTS, YEARS };
+module.exports = {
+  data,
+  ready,
+  save,
+  flush,
+  uid,
+  now,
+  findUser,
+  hasPriv,
+  log,
+  notify,
+  withNote,
+  pub,
+  windowState,
+  sweepAccreditation,
+  ALL_PRIVS,
+  DEFAULT_PRIVS,
+  DEPARTMENTS,
+  YEARS
+};

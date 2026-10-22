@@ -10,7 +10,7 @@ const DEPARTMENTS = [
   'College of Teacher Education'
 ];
 const YEARS = ['1', '2', '3', '4'];
-const API = location.port === '4000' ? '' : 'http://localhost:4000';
+const API = '';
 
 const Session = {
   get token() { return localStorage.getItem('token'); },

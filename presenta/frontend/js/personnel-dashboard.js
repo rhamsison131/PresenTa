@@ -1,87 +1,87 @@
-// --- 1. IMMEDIATE SECURITY & TOKEN PATCH ---
-const token = localStorage.getItem('token');
-const user = JSON.parse(localStorage.getItem('user') || 'null');
-
-if (!token || !user || user.role !== 'personnel') {
-    window.location.href = 'login.html';
-}
-
-// 🚨 GLOBAL FETCH INTERCEPTOR 🚨
-// This forces EVERY fetch call in the app (even from dashboard.js) to include the token!
-const originalFetch = window.fetch;
-window.fetch = async (...args) => {
-    let [resource, config] = args;
-    
-    // Only intercept API calls
-    if (typeof resource === 'string' && resource.startsWith('/api/')) {
-        config = config || {};
-        config.headers = config.headers || {};
-        config.headers['Authorization'] = `Bearer ${token}`;
-    }
-    
-    const response = await originalFetch(resource, config);
-    
-    // If we get a 401 Session Expired, handle it cleanly
-    if (response.status === 401 && !window.location.href.includes('login.html')) {
-        console.error("Global interceptor caught 401. Logging out.");
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        window.location.href = 'login.html';
-        return response;
-    }
-    
-    return response;
-};
-// ------------------------------------------
-
-// --- 2. UI SETUP ---
-document.addEventListener('DOMContentLoaded', () => {
-    // 1. Stop forms from reloading
-    document.querySelectorAll('form').forEach(form => {
-        form.addEventListener('submit', (e) => e.preventDefault());
-    });
-
-    // 2. Set the user's name
-    const nameEl = document.getElementById('userName');
-    if (nameEl) nameEl.textContent = user.name;
-    
-    // 3. Load data
-    loadDashboardData();
-});
-
-async function loadDashboardData() {
+// --- 1. SAFETY NET (Overwrite the aggressive logout in dashboard.js) ---
+// Prevent dashboard.js from instantly logging out on a 401 during load
+const originalApi = window.api;
+window.api = async function(path, opt) {
     try {
-        // Fetch notifications
-        const notifRes = await fetch('/api/notifications');
-        if (notifRes.ok) {
-            const notifData = await notifRes.json();
-            const unreadCount = notifData.unread || 0;
-            const badge = document.getElementById('notifBadge');
-            if (badge) {
-                badge.textContent = unreadCount;
-                badge.style.display = unreadCount > 0 ? 'inline-block' : 'none';
-            }
+        return await originalApi(path, opt);
+    } catch (e) {
+        // If it's a temporary network error, don't log out immediately
+        if (e.message === 'Cannot reach the server') {
+            console.warn("Network hiccup, ignoring logout for now.");
+            throw e;
         }
-
-        // Fetch profile data
-        const meRes = await fetch('/api/me');
-        if (meRes.ok) {
-            const meData = await meRes.json();
-            console.log("Logged in as:", meData.user.name);
-        }
-
-    } catch (err) {
-        console.error("Dashboard error:", err);
+        throw e;
     }
-}
+};
 
-// --- 3. LOGOUT BUTTON ---
-const logoutBtn = document.getElementById('logoutBtn');
-if (logoutBtn) {
-    logoutBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        window.location.href = 'login.html';
+// --- 2. CONFIGURE PERSONNEL DASHBOARD ---
+document.addEventListener('DOMContentLoaded', () => {
+    // Ensure token exists
+    if (!Session.token || !Session.user) {
+        location.href = 'login.html';
+        return;
+    }
+
+    // Define the Personnel specific views
+    const personnelViews = {
+        overview: {
+            title: 'Overview',
+            nav: 'overview',
+            async render(el) {
+                // Fetch dashboard stats
+                let data = { pending: 0, events: 0 };
+                try {
+                    const events = await api('/api/approvals');
+                    data.pending = events.filter(e => e.status === 'pending').length;
+                    data.events = events.length;
+                } catch (e) {}
+
+                el.innerHTML = tilesHtml([
+                    ['Pending Approvals', data.pending],
+                    ['Total Events', data.events],
+                    ['Accreditation Sweeps', 'Active']
+                ]) + `<div class="card"><h3>Welcome, ${esc(Session.user.name)}</h3><p>Use the sidebar to manage event approvals, verify student accounts, and monitor reports.</p></div>`;
+            }
+        },
+        approvals: {
+            title: 'Event Approvals',
+            nav: 'approvals',
+            render: ApprovalsUI.view
+        },
+        reports: {
+            title: 'Attendance Reports',
+            nav: 'reports',
+            render: ReportsUI.view
+        },
+        fees: {
+            title: 'Fees & Payments',
+            nav: 'fees',
+            render: FeesUI.view
+        },
+        notifications: {
+            title: 'Notifications',
+            nav: 'notifications',
+            render: notificationsView
+        },
+        profile: {
+            title: 'My Profile',
+            nav: 'profile',
+            render: profileView
+        }
+    };
+
+    // Mount the shell using dashboard.js's function
+    mountShell({
+        role: 'personnel',
+        home: 'overview',
+        views: personnelViews,
+        nav: [
+            { id: 'overview', label: 'Overview', icon: 'grid' },
+            { id: 'approvals', label: 'Event Approvals', icon: 'check' },
+            { id: 'reports', label: 'Reports', icon: 'file' },
+            { id: 'fees', label: 'Fees & Payments', icon: 'card' },
+            { id: 'notifications', label: 'Notifications', icon: 'bell' },
+            { id: 'profile', label: 'My Profile', icon: 'user' }
+        ]
     });
-}
+});

@@ -9,77 +9,99 @@ window.api = async function(path, opt) {
     }
 };
 
-// --- 2. NEW VIEW FOR ACCOUNTS/ORGS APPROVAL ---
+// --- 2. ACCOUNT VERIFICATIONS UI (Matches your backend) ---
 const AccountsUI = {
     async view(el) {
-        el.innerHTML = '<div class="loading">Loading pending accounts...</div>';
+        el.innerHTML = '<div class="loading">Loading accounts...</div>';
         try {
-            // We are assuming your backend has this endpoint. 
-            // If it's named differently, change this URL.
-            const users = await api('/api/admin/pending'); 
-            
-            if (!users || users.length === 0) {
-                el.innerHTML = `<div class="card"><div class="empty">No pending accounts to verify.</div></div>`;
-                return;
-            }
+            // Fetch both students and orgs using your exact backend routes
+            const students = await api('/api/verify/students');
+            const orgs = await api('/api/verify/orgs');
 
-            const rows = users.map(u => `
+            // Filter for pending items
+            const pendingStudents = students.filter(s => s.status === 'pending' || s.status === 'active'); 
+            const pendingOrgs = orgs.filter(o => o.status === 'pending');
+
+            const studentRows = pendingStudents.map(u => `
                 <tr>
                     <td><b>${esc(u.name)}</b><small>${esc(u.email)}</small></td>
-                    <td>${chip('warn', u.role === 'organization' ? 'Organization' : 'Student')}</td>
-                    <td>${esc(u.department || '—')}<small>${esc(u.course || u.position || '')}</small></td>
-                    <td>${esc(fmtD(u.created_at))}</td>
+                    <td>${esc(u.student_id || '—')}<small>${esc(u.course || '')}</small></td>
+                    <td>${esc(u.department || '—')}<small>Year ${esc(u.year || '—')}</small></td>
+                    <td>${chip(u.status === 'pending' ? 'warn' : 'ok', u.status)}</td>
                     <td>
                         <div class="btns">
-                            <button class="btn sm" onclick="AccountsUI.approve('${esc(u.id)}')">Approve</button>
-                            <button class="btn sm danger" onclick="AccountsUI.reject('${esc(u.id)}')">Reject</button>
+                            <button class="btn sm" onclick="AccountsUI.verifyStudent('${esc(u.id)}', 'approve')">Approve</button>
+                            <button class="btn sm ghost" onclick="AccountsUI.verifyStudent('${esc(u.id)}', 'hold')">Hold</button>
+                            <button class="btn sm danger" onclick="AccountsUI.verifyStudent('${esc(u.id)}', 'reject')">Reject</button>
                         </div>
                     </td>
                 </tr>
-            `);
+            `).join('');
 
-            el.innerHTML = `<div class="card">
-                <div class="toolbar"><h3 style="margin:0">Pending Account Verifications</h3></div>
-                ${tableHtml(['Name / Email', 'Type', 'Details', 'Registered', 'Actions'], rows)}
-            </div>`;
+            const orgRows = pendingOrgs.map(o => `
+                <tr>
+                    <td><b>${esc(o.name)}</b><small>${esc(o.department || 'University-wide')}</small></td>
+                    <td>${o.officers.length} Officer(s)<small>${o.officers.map(x => x.name).join(', ')}</small></td>
+                    <td>${chip(o.status === 'accredited' ? 'ok' : 'warn', o.status)}</td>
+                    <td>
+                        <div class="btns">
+                            <button class="btn sm" onclick="AccountsUI.verifyOrg('${esc(o.id)}', 'accredit')">Accredit</button>
+                            <button class="btn sm danger" onclick="AccountsUI.verifyOrg('${esc(o.id)}', 'not_accredited')">Reject</button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+
+            el.innerHTML = `
+                <div class="card">
+                    <div class="toolbar"><h3 style="margin:0">Student Accounts</h3></div>
+                    ${pendingStudents.length ? tableHtml(['Student', 'ID / Course', 'Department', 'Status', 'Actions'], [studentRows]) : '<div class="empty">No students to verify.</div>'}
+                </div>
+                <div class="card">
+                    <div class="toolbar"><h3 style="margin:0">Organization Accreditation</h3></div>
+                    ${pendingOrgs.length ? tableHtml(['Organization', 'Officers', 'Status', 'Actions'], [orgRows]) : '<div class="empty">No organizations to verify.</div>'}
+                </div>
+            `;
 
         } catch (err) {
             el.innerHTML = `<div class="card"><div class="empty">Error: ${esc(err.message)}</div></div>`;
         }
     },
 
-    async approve(id) {
+    async verifyStudent(id, decision) {
+        const titles = { approve: 'Approve Student', hold: 'Put on Hold', reject: 'Reject Student' };
         const note = await decisionBox({ 
-            title: 'Approve Account', 
-            intro: 'This will activate the account and send them an email.', 
-            label: 'Message to user (optional)', 
-            okLabel: 'Approve' 
+            title: titles[decision], 
+            label: 'Message to student', 
+            required: decision !== 'approve',
+            danger: decision === 'reject',
+            okLabel: titles[decision]
         });
         if (note === null) return;
         
-        const r = await run(null, () => api('/api/admin/verify', { 
+        const r = await run(null, () => api('/api/verify/students/' + id, { 
             method: 'POST', 
-            body: { userId: id, action: 'approve', note } 
-        }), 'Account approved');
+            body: { decision, note } 
+        }), 'Student updated');
         
         if (r) refresh();
     },
 
-    async reject(id) {
+    async verifyOrg(id, decision) {
+        const titles = { accredit: 'Accredit Organization', not_accredited: 'Reject Organization' };
         const note = await decisionBox({ 
-            title: 'Reject Account', 
-            intro: 'Please provide a reason. They will not be able to log in.', 
-            label: 'Reason for rejection', 
-            required: true, 
-            danger: true, 
-            okLabel: 'Reject' 
+            title: titles[decision], 
+            label: 'Message to organization', 
+            required: decision !== 'accredit',
+            danger: decision === 'not_accredited',
+            okLabel: titles[decision]
         });
         if (note === null) return;
         
-        const r = await run(null, () => api('/api/admin/verify', { 
+        const r = await run(null, () => api('/api/verify/orgs/' + id, { 
             method: 'POST', 
-            body: { userId: id, action: 'reject', note } 
-        }), 'Account rejected');
+            body: { decision, note } 
+        }), 'Organization updated');
         
         if (r) refresh();
     }
@@ -97,19 +119,10 @@ document.addEventListener('DOMContentLoaded', () => {
             title: 'Overview',
             nav: 'overview',
             async render(el) {
-                let data = { pendingEvents: 0, pendingUsers: 0 };
-                try {
-                    const events = await api('/api/approvals');
-                    data.pendingEvents = events.filter(e => e.status === 'pending').length;
-                    const users = await api('/api/admin/pending');
-                    data.pendingUsers = users.length;
-                } catch (e) {}
-
                 el.innerHTML = tilesHtml([
-                    ['Pending Events', data.pendingEvents],
-                    ['Pending Accounts', data.pendingUsers],
+                    ['Pending Approvals', '—'],
                     ['System Status', 'Online']
-                ]) + `<div class="card"><h3>Welcome, ${esc(Session.user.name)}</h3><p>You have access to verify student accounts, approve organizations, and monitor events.</p></div>`;
+                ]) + `<div class="card"><h3>Welcome, ${esc(Session.user.name)}</h3><p>Use the sidebar to verify student accounts, accredit organizations, and approve events.</p></div>`;
             }
         },
         accounts: {
@@ -150,7 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
         views: personnelViews,
         nav: [
             { id: 'overview', label: 'Overview', icon: 'grid' },
-            { id: 'accounts', label: 'Account Approvals', icon: 'users' }, // NEW TAB
+            { id: 'accounts', label: 'Account Approvals', icon: 'users' },
             { id: 'approvals', label: 'Event Approvals', icon: 'check' },
             { id: 'reports', label: 'Reports', icon: 'file' },
             { id: 'fees', label: 'Fees & Payments', icon: 'card' },

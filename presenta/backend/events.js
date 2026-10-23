@@ -413,6 +413,19 @@ const mount = (app) => {
     res.json({ message: decision === 'approve' ? 'Event approved' : 'Event disapproved', event: present(e, req.user) });
   }));
 
+  app.post('/api/events/:id/request-letters', authenticate, requirePriv('approve_events'), wrap(async (req, res) => {
+    const e = db.data.events.find((x) => x.id === req.params.id);
+    if (!e) return res.status(404).json({ message: 'Event not found' });
+    if (e.status !== 'pending') return res.status(400).json({ message: 'This event is not waiting for approval' });
+    const note = clean(req.body && req.body.note);
+    if (!note) return res.status(400).json({ message: 'List the letters the organization needs to submit' });
+    e.letters_request = { note, requested_by: req.user.id, requested_by_name: req.user.name, requested_at: db.now() };
+    await db.save();
+    db.log(req.user, 'event_letters_requested', e.title + ' | ' + note);
+    officersOf(e).forEach((u) => db.notify(u.id, 'Letters needed for your event', '"' + e.title + '" needs the following before SAO can decide:\n\n' + note + '\n\n— ' + req.user.name + ', SAO'));
+    res.json({ message: 'Organization notified', event: present(e, req.user) });
+  }));
+
   app.post('/api/events/:id/registration', ...orgAccess, wrap(async (req, res) => {
     const e = findEvent(req, res, 'own');
     if (!e) return;

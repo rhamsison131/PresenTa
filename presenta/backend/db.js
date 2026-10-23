@@ -29,14 +29,17 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 });
 
 const data = {};
+const meta = { rev: '' };
 let queue = Promise.resolve();
 
 const persist = async () => {
   try {
+    const stamp = new Date().toISOString();
     const { error } = await supabase
       .from('app_state')
-      .upsert({ id: ROW_ID, data, updated_at: new Date().toISOString() });
+      .upsert({ id: ROW_ID, data, updated_at: stamp });
     if (error) console.error('Supabase save failed:', error.message);
+    else meta.rev = stamp;
   } catch (err) {
     console.error('Supabase save failed:', err.message);
   }
@@ -74,10 +77,11 @@ const load = async () => {
   await queue;
   const { data: row, error } = await supabase
     .from('app_state')
-    .select('data')
+    .select('data, updated_at')
     .eq('id', ROW_ID)
     .maybeSingle();
   if (error) throw new Error('Supabase load failed: ' + error.message);
+  meta.rev = (row && row.updated_at) || meta.rev;
   Object.keys(data).forEach((k) => delete data[k]);
   Object.assign(data, (row && row.data) || {});
   normalize();
@@ -173,6 +177,7 @@ const pub = (u) => {
 
 module.exports = {
   data,
+  meta,
   ready,
   reload,
   supabase,

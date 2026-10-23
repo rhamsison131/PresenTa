@@ -272,6 +272,7 @@ const mount = (app) => {
   }));
   app.post('/api/auth/forgot', forgot);
   app.post('/api/auth/reset', reset);
+  app.get('/api/pulse', authenticate, (req, res) => res.json({ rev: db.meta.rev }));
   app.get('/api/me', authenticate, (req, res) => res.json({ user: db.pub(req.user) }));
   app.put('/api/me', authenticate, updateMe);
   app.get('/api/notifications', authenticate, (req, res) => {

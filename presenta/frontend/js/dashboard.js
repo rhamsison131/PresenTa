@@ -198,7 +198,7 @@ function eventRow(e, actions) {
   return `<div class="ev-row" data-id="${esc(e.id)}">
     <div class="ev-cover" style="background:${coverOf(e.category)}">${esc((e.title || 'E').charAt(0).toUpperCase())}</div>
     <div class="ev-main"><span class="chip">${esc(e.category)}</span> ${chip(e.phase, PHASE[e.phase])} ${e.is_paid ? chip('warn', 'Paid ₱' + e.ticket_price) : chip('ok', 'Free')}<h4>${esc(e.title)}</h4><p>${esc(e.description || e.org_name)}</p></div>
-    <div class="ev-meta"><div>${icon('pin', 14)}<span>${esc(e.venue)}</span></div>${e.payment ? `<div>${icon('card', 14)}<span>Fee ₱${esc(e.payment.amount)} · Ref ${esc(e.payment.reference)}</span></div>` : ''}<div>${icon('users', 14)}<span>${esc(e.eligibility || 'All')}</span></div><div>${icon('calendar', 14)}<span>${esc(fmtDT(e.starts_at))}</span></div>${e.org_name ? `<div>${icon('building', 14)}<span>${esc(e.org_name)}</span></div>` : ''}</div>
+    <div class="ev-meta"><div>${icon('pin', 14)}<span>${esc(e.venue)}</span></div>${e.payment ? `<div>${icon('card', 14)}<span>Fee ₱${esc(e.payment.amount)} · Ref ${esc(e.payment.reference)}</span></div>` : ''}<div>${icon('users', 14)}<span>${esc(e.eligibility || 'All')}</span></div><div>${icon('calendar', 14)}<span>${esc(fmtDT(e.starts_at))}</span></div>${e.letters_request && e.status === 'pending' ? `<div>${icon('file', 14)}<span>Letters needed: ${esc(e.letters_request.note)}</span></div>` : ''}${e.org_name ? `<div>${icon('building', 14)}<span>${esc(e.org_name)}</span></div>` : ''}</div>
     <div class="ev-seats"><div class="bar"><i style="width:${pct}%"></i></div><small>${pct}% seats filled</small></div>
     <div class="ev-left"><b>${e.seats_left}</b><small>Seats left</small></div>
     <div class="ev-act">${actions || ''}</div>
@@ -248,10 +248,38 @@ function mountShell(cfg) {
   document.addEventListener('mousedown', (e) => {
     if (!e.target.closest('#panel') && !e.target.closest('#bell')) $('#panel').classList.add('hidden');
   });
-  window.addEventListener('hashchange', route);
+  window.addEventListener('hashchange', () => route());
   route();
   pollNotifs();
   setInterval(pollNotifs, 30000);
+  livePulse();
+  setInterval(livePulse, 4000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) livePulse(); });
+}
+
+let liveRev = null;
+let liveBusy = false;
+async function livePulse() {
+  if (liveBusy || document.hidden) return;
+  liveBusy = true;
+  try {
+    const d = await api('/api/pulse');
+    if (liveRev === null) {
+      liveRev = d.rev;
+    } else if (d.rev !== liveRev) {
+      pollNotifs();
+      const tag = (document.activeElement && document.activeElement.tagName) || '';
+      const busy = /^(INPUT|TEXTAREA|SELECT)$/.test(tag) || $('.overlay') || App.cleanup;
+      if (!busy) {
+        liveRev = d.rev;
+        route(true);
+      }
+    }
+  } catch (e) {
+    return;
+  } finally {
+    liveBusy = false;
+  }
 }
 
 function paintUser() {
@@ -261,30 +289,31 @@ function paintUser() {
   $('#whoSub').textContent = (u.role === 'organization' && u.org_name) || ROLE_LABEL[u.role] || '';
 }
 
-async function route() {
+async function route(silent) {
   const parts = (location.hash.slice(1) || App.home).split('/');
   const id = App.views[parts[0]] ? parts[0] : App.home;
   const v = App.views[id];
   const seq = ++App.seq;
-  if (App.cleanup) {
-    App.cleanup();
-    App.cleanup = null;
+  if (!silent) {
+    if (App.cleanup) {
+      App.cleanup();
+      App.cleanup = null;
+    }
+    closeModals();
   }
-  closeModals();
   $$('[data-nav]').forEach((a) => a.classList.toggle('on', a.dataset.nav === (v.nav || id)));
   $('#title').textContent = v.title;
   $('#crumb').textContent = 'Dashboard / ' + v.title;
   const el = $('#view');
-  el.innerHTML = '<div class="loading">Loading…</div>';
+  if (!silent) el.innerHTML = '<div class="loading">Loading…</div>';
   try {
     const out = document.createElement('div');
     await v.render(out, parts[1]);
     if (seq !== App.seq) return;
-    el.innerHTML = '';
-    el.appendChild(out);
+    el.replaceChildren(out);
     if (v.after) v.after(out, parts[1]);
   } catch (e) {
-    if (seq === App.seq) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    if (seq === App.seq && !silent) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
 }
 
@@ -469,6 +498,15 @@ const ApprovalsUI = {
     if (r) refresh();
   },
 
+  async letters(id) {
+    const ev = ApprovalsUI.list.find((x) => x.id === id);
+    const title = ev ? `<b>${esc(ev.title)}</b>${ev.org_name ? ' · ' + esc(ev.org_name) : ''}<br>` : '';
+    const note = await decisionBox({ title: 'Request letters', intro: title + 'The organization will be notified of the letters they must submit before SAO decides.', label: 'Needed letters', required: true, okLabel: 'Notify organization', placeholder: 'Example: Letter of intent, adviser endorsement, venue permit.' });
+    if (note === null) return;
+    const r = await run(null, () => api('/api/events/' + id + '/request-letters', { method: 'POST', body: { note } }), 'Organization notified');
+    if (r) refresh();
+  },
+
   async view(el) {
     const list = await api('/api/approvals');
     ApprovalsUI.list = list;
@@ -479,7 +517,7 @@ const ApprovalsUI = {
     };
     const acts = (e) => {
       const id = esc(e.id);
-      if (e.status === 'pending') return `<button class="btn sm" onclick="ApprovalsUI.decide('${id}','approve')">Approve</button><button class="btn sm danger" onclick="ApprovalsUI.decide('${id}','reject')">Disapprove</button>`;
+      if (e.status === 'pending') return `<button class="btn sm ghost" onclick="ApprovalsUI.letters('${id}')">Request letters</button><button class="btn sm" onclick="ApprovalsUI.decide('${id}','approve')">Approve</button><button class="btn sm danger" onclick="ApprovalsUI.decide('${id}','reject')">Disapprove</button>`;
       if (e.status === 'rejected') return `<small style="max-width:200px">Reason: ${esc(e.approval_note)}</small>`;
       return chip('ok', 'Approved');
     };

@@ -35,7 +35,8 @@ const phaseOf = (e) => {
   return 'upcoming';
 };
 
-const activeRegs = (eventId) => db.data.registrations.filter((r) => r.event_id === eventId && r.status === 'reserved');
+const activeRegs = (eventId) => db.data.registrations.filter((r) => r.event_id === eventId && r.status === 'reserved' && !r.walk_in);
+const allRegs = (eventId) => db.data.registrations.filter((r) => r.event_id === eventId && r.status === 'reserved');
 const orgOf = (e) => db.data.orgs.find((o) => o.id === e.org_id);
 const userById = (id) => db.data.users.find((u) => u.id === id);
 
@@ -174,13 +175,33 @@ const findEvent = (req, res, mode) => {
 };
 
 const attendanceRows = (e) =>
-  activeRegs(e.id)
-    .sort((a, b) => a.seat_no - b.seat_no)
+  allRegs(e.id)
+    .sort((a, b) => (a.walk_in ? 1 : 0) - (b.walk_in ? 1 : 0) || (a.seat_no || 0) - (b.seat_no || 0) || String(a.reserved_at).localeCompare(String(b.reserved_at)))
     .map((r) => {
+      if (r.walk_in) {
+        const w = r.walkin || {};
+        return {
+          id: r.id,
+          seat_no: 'Walk-in',
+          walk_in: true,
+          name: w.name || 'Unknown',
+          email: w.email || '',
+          student_id: w.student_id || '',
+          department: w.department || '',
+          course: w.course || '',
+          year: w.year || '',
+          reserved_at: r.reserved_at,
+          attended: true,
+          attended_at: r.attended_at || null,
+          left: false,
+          left_at: null
+        };
+      }
       const s = userById(r.student_id) || {};
       return {
         id: r.id,
         seat_no: r.seat_no,
+        walk_in: false,
         name: s.name || 'Unknown',
         email: s.email || '',
         student_id: s.student_id || '',
@@ -196,11 +217,13 @@ const attendanceRows = (e) =>
     });
 
 const statsOf = (rows) => {
+  const reg = rows.filter((r) => !r.walk_in);
   const presentCount = rows.filter((r) => r.attended).length;
   return {
-    registered: rows.length,
+    registered: reg.length,
+    walk_ins: rows.length - reg.length,
     present: presentCount,
-    pending: rows.length - presentCount,
+    pending: reg.filter((r) => !r.attended).length,
     rate: rows.length ? Math.round((presentCount / rows.length) * 100) : 0
   };
 };
@@ -426,6 +449,68 @@ const mount = (app) => {
     res.json({ message: 'Organization notified', event: present(e, req.user) });
   }));
 
+  app.post('/api/events/:id/walkin', ...orgAccess, wrap(async (req, res) => {
+    const e = findEvent(req, res, 'own');
+    if (!e) return;
+    if (e.status !== 'published') return res.status(400).json({ message: 'Only published events can accept walk-ins' });
+    if (phaseOf(e) === 'past') return res.status(400).json({ message: 'This event has already ended' });
+    const b = req.body || {};
+    const sid = clean(b.student_id).slice(0, 40);
+    const acct = sid ? db.data.users.find((u) => u.role === 'student' && u.student_id && u.student_id.toLowerCase() === sid.toLowerCase()) : null;
+    const w = {
+      name: (clean(b.name) || (acct ? acct.name : '')).slice(0, 120),
+      student_id: sid,
+      email: (clean(b.email) || (acct ? acct.email : '')).slice(0, 120),
+      department: (clean(b.department) || (acct ? acct.department : '')).slice(0, 120),
+      course: (clean(b.course) || (acct ? acct.course : '')).slice(0, 80),
+      year: (clean(b.year) || (acct ? acct.year : '')).slice(0, 10)
+    };
+    if (!w.name) return res.status(400).json({ message: 'Enter the attendee name' });
+    if (b.email && !/^\S+@\S+\.\S+$/.test(clean(b.email))) return res.status(400).json({ message: 'Enter a valid email address' });
+    if (acct) {
+      const reg = activeRegs(e.id).find((r) => r.student_id === acct.id);
+      if (reg) {
+        if (reg.attended) return res.status(409).json({ message: w.name + ' is already checked in' });
+        reg.attended = true;
+        reg.attended_at = db.now();
+        reg.manual = true;
+        delete reg.left_at;
+        await db.save();
+        db.log(req.user, 'manual_checkin', e.title + ' | ' + w.name);
+        return res.json({ message: w.name + ' has a reserved seat and was marked present' });
+      }
+    }
+    const dupe = allRegs(e.id).find((r) => r.walk_in && r.walkin && (sid ? String(r.walkin.student_id || '').toLowerCase() === sid.toLowerCase() : String(r.walkin.name || '').toLowerCase() === w.name.toLowerCase()));
+    if (dupe) return res.status(409).json({ message: w.name + ' is already recorded as a walk-in' });
+    db.data.registrations.push({
+      id: db.uid('r_'),
+      event_id: e.id,
+      student_id: null,
+      linked_id: acct ? acct.id : '',
+      walk_in: true,
+      walkin: w,
+      status: 'reserved',
+      reserved_at: db.now(),
+      attended: true,
+      attended_at: db.now(),
+      added_by: req.user.id
+    });
+    await db.save();
+    db.log(req.user, 'walkin_add', e.title + ' | ' + w.name);
+    res.status(201).json({ message: 'Walk-in recorded: ' + w.name });
+  }));
+
+  app.delete('/api/events/:id/walkin/:rid', ...orgAccess, wrap(async (req, res) => {
+    const e = findEvent(req, res, 'own');
+    if (!e) return;
+    const reg = db.data.registrations.find((r) => r.id === req.params.rid && r.event_id === e.id && r.walk_in);
+    if (!reg) return res.status(404).json({ message: 'Walk-in not found' });
+    db.data.registrations = db.data.registrations.filter((r) => r.id !== reg.id);
+    await db.save();
+    db.log(req.user, 'walkin_remove', e.title + ' | ' + ((reg.walkin || {}).name || ''));
+    res.json({ message: 'Walk-in removed' });
+  }));
+
   app.post('/api/events/:id/registration', ...orgAccess, wrap(async (req, res) => {
     const e = findEvent(req, res, 'own');
     if (!e) return;
@@ -580,7 +665,8 @@ const mount = (app) => {
       venue: e.venue,
       event_date: e.starts_at,
       school_year: schoolYear(e.starts_at),
-      total_registered: stats.registered,
+      total_registered: stats.registered + stats.walk_ins,
+      total_walk_ins: stats.walk_ins,
       total_present: stats.present,
       total_absent: stats.pending,
       rate: stats.rate,

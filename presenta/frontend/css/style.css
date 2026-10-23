@@ -108,3 +108,21 @@ a { color: inherit; }
   .qr-cube, .qr-float, .qr-glow, .qr-scan, .qr-floor { animation: none; }
   .qr-cube { transform: rotateX(-14deg) rotateY(-24deg); }
 }
+/* ---------- compact sign-up ---------- */
+#registerBox { max-width: 580px; padding: 24px 28px; }
+#registerBox h2 { font-size: 22px; margin-bottom: 4px; }
+#registerBox .sub { font-size: 13px; margin-bottom: 14px; line-height: 1.4; }
+#registerBox .msg { padding: 9px 12px; margin-bottom: 12px; }
+#registerForm { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+#registerForm #studentFields, #registerForm #orgFields, #registerForm .row2 { display: contents; }
+#registerForm .field { margin-bottom: 0; min-width: 0; }
+#registerForm .field label { margin-bottom: 4px; font-size: 11px; }
+#registerForm .field input, #registerForm .field select { padding: 9px 12px; border-radius: 10px; }
+#registerForm .field:first-child, #registerForm #regOrg, #registerForm #regOrgDept { grid-column: 1 / -1; }
+#registerForm .field:has(#regMember) { grid-column: 1 / -1; }
+#registerForm .btn-primary { grid-column: 1 / -1; padding: 12px 24px; margin-top: 4px; }
+@media (max-width: 560px) {
+  #registerBox { padding: 20px 16px; }
+  #registerForm { grid-template-columns: 1fr; }
+  #registerForm .field input, #registerForm .field select { font-size: 16px; }
+}

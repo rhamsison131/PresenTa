@@ -21,8 +21,10 @@ const P = {
   form(ev) {
     const v = ev || {};
     const now = Date.now();
-    const start = v.starts_at ? toLocalInput(v.starts_at) : toLocalInput(new Date(now + 86400000).toISOString());
-    const end = v.ends_at ? toLocalInput(v.ends_at) : toLocalInput(new Date(now + 86400000 + 7200000).toISOString());
+    const tmr = new Date(now + 86400000);
+    tmr.setHours(8, 0, 0, 0);
+    const start = v.starts_at || tmr.toISOString();
+    const end = v.ends_at || new Date(tmr.getTime() + 7200000).toISOString();
     const me = Session.user || {};
     const deptLocked = Boolean(me.org_department);
     const aud = v.audience || { department: 'All', year: 'All', org_id: '' };
@@ -42,8 +44,8 @@ const P = {
         <div class="f full"><label for="fDesc">Description</label><textarea id="fDesc" placeholder="What is this event about?">${esc(v.description || '')}</textarea></div>
       </div></section>
       <section class="ef-sec"><h4><i>2</i>Schedule and capacity</h4><div class="form-grid">
-        <div class="f"><label for="fStart">Starts</label><input id="fStart" type="datetime-local" value="${start}" required></div>
-        <div class="f"><label for="fEnd">Ends</label><input id="fEnd" type="datetime-local" value="${end}" required></div>
+        <div class="f full"><label>Starts</label>${dtPicker('fStart', start, !ev)}</div>
+        <div class="f full"><label>Ends</label>${dtPicker('fEnd', end, !ev)}</div>
         <div class="f"><label for="fSeats">Seat limit</label><input id="fSeats" type="number" min="1" value="${esc(v.seat_limit || 50)}" required></div>
         <div class="f"><label for="fPrice">Ticket price (₱)</label><input id="fPrice" type="number" min="1" step="0.01" value="${esc(v.ticket_price || '')}" ${v.is_paid ? '' : 'disabled'} ${locked ? 'readonly' : ''}></div>
         <label class="ef-check full"><input type="checkbox" id="fPaid" ${v.is_paid ? 'checked' : ''} ${locked ? 'disabled' : ''}><span>This is a paid event <small>(organizers collect fees themselves, outside Presenta)</small></span></label>
@@ -97,12 +99,30 @@ const P = {
     fee();
     geoNote();
     $('#fCancel', m.el).onclick = m.close;
+    let span = new Date(end) - new Date(start);
+    const syncEnd = () => {
+      const a = dtGet($('#fStart', m.el));
+      if (!a) return;
+      dtSet($('#fEnd', m.el), new Date(a.getTime() + (span > 0 ? span : 7200000)));
+      $('.dt-d', $('#fEnd', m.el)).min = $('.dt-d', $('#fStart', m.el)).value;
+    };
+    $('#fStart', m.el).addEventListener('change', syncEnd);
+    $('#fEnd', m.el).addEventListener('change', () => {
+      const a = dtGet($('#fStart', m.el));
+      const b = dtGet($('#fEnd', m.el));
+      if (a && b) span = b - a;
+    });
     $('#evForm', m.el).onsubmit = async (e) => {
       e.preventDefault();
+      const sd = dtGet($('#fStart', m.el));
+      const ed = dtGet($('#fEnd', m.el));
+      if (!sd || !ed) return toast('Choose the start and end date', 'err');
+      if (!ev && sd.getTime() < Date.now()) return toast('The start time cannot be in the past', 'err');
+      if (ed <= sd) return toast('The end time must be after the start time', 'err');
       const paid = $('#fPaid', m.el).checked;
       const body = {
         title: $('#fTitle', m.el).value, category: $('#fCat', m.el).value, venue: $('#fVenue', m.el).value,
-        starts_at: new Date($('#fStart', m.el).value).toISOString(), ends_at: new Date($('#fEnd', m.el).value).toISOString(),
+        starts_at: sd.toISOString(), ends_at: ed.toISOString(),
         seat_limit: $('#fSeats', m.el).value, is_paid: paid, ticket_price: paid ? $('#fPrice', m.el).value : 0,
         aud_department: $('#fAudDept', m.el).value, aud_year: $('#fAudYear', m.el).value, aud_org: $('#fAudOrg', m.el).value,
         description: $('#fDesc', m.el).value,
@@ -156,6 +176,33 @@ const P = {
 
   submit(id) {
     return P.pay(id);
+  },
+
+  walkin(id) {
+    const dept = '<option value="">Select department</option>' + DEPARTMENTS.map((d) => `<option>${esc(d)}</option>`).join('');
+    const yr = '<option value="">Select year level</option>' + YEARS.map((y) => `<option value="${y}">Year ${y}</option>`).join('');
+    const m = modal('Add walk-in attendee', `<form id="wiForm"><div class="form-grid">
+      <div class="f"><label for="wId">Student ID (optional)</label><input id="wId" maxlength="40"></div>
+      <div class="f"><label for="wName">Full name</label><input id="wName" maxlength="120" required></div>
+      <div class="f"><label for="wDept">Department</label><select id="wDept">${dept}</select></div>
+      <div class="f"><label for="wCourse">Course</label><input id="wCourse" maxlength="80" placeholder="e.g. BSIT"></div>
+      <div class="f"><label for="wYear">Year level</label><select id="wYear">${yr}</select></div>
+      <div class="f"><label for="wEmail">Email (optional)</label><input id="wEmail" type="email" maxlength="120"></div></div>
+      <p class="hint">The attendee is marked present right away and does not use a seat. If the student ID belongs to a student who already reserved a seat, that seat is marked present instead.</p>
+      <div class="modal-actions"><button type="button" class="btn ghost" id="wCancel">Cancel</button><button class="btn" type="submit">Add walk-in</button></div></form>`);
+    $('#wCancel', m.el).onclick = m.close;
+    $('#wiForm', m.el).onsubmit = async (e) => {
+      e.preventDefault();
+      const body = { student_id: $('#wId', m.el).value, name: $('#wName', m.el).value, department: $('#wDept', m.el).value, course: $('#wCourse', m.el).value, year: $('#wYear', m.el).value, email: $('#wEmail', m.el).value };
+      const r = await run($('button[type=submit]', m.el), () => api('/api/events/' + id + '/walkin', { method: 'POST', body }), (x) => x.message);
+      if (r) { m.close(); refresh(); }
+    };
+  },
+
+  async rmWalkin(id, rid) {
+    if (!(await confirmBox('Remove walk-in', 'Remove this walk-in from the attendance list?', 'Remove', true))) return;
+    const r = await run(null, () => api('/api/events/' + id + '/walkin/' + rid, { method: 'DELETE' }), 'Walk-in removed');
+    if (r) refresh();
   },
 
   async toggleReg(id, open) {
@@ -226,12 +273,12 @@ const P = {
         <h3 style="margin:10px 0 6px;font-size:20px">${esc(e.title)}</h3><div style="font-size:13px;color:var(--muted)">${esc(e.venue)} · ${esc(fmtDT(e.starts_at))} – ${esc(fmtT(e.ends_at))} · ${e.geo ? 'Check-in within ' + esc(e.radius_m) + ' m' : '<span style="color:var(--bad)">Venue point not set</span>'}</div></div>
         <a class="btn ghost" href="#events">Back to events</a></div>
         <div class="page-actions">
-          ${e.status === 'draft' || e.status === 'rejected' ? `<button class="btn" onclick="P.submit('${id2}')">Pay and submit</button>` : e.status === 'pending' ? '<span class="chip warn">Waiting for SAO approval</span>' : `<button class="btn" onclick="P.toggleReg('${id2}',${e.registration !== 'open'})">${e.registration === 'open' ? 'Close registration' : 'Open registration'}</button><button class="btn dark" onclick="P.showQR('${id2}')">Display QR code</button>`}
+          ${e.status === 'draft' || e.status === 'rejected' ? `<button class="btn" onclick="P.submit('${id2}')">Pay and submit</button>` : e.status === 'pending' ? '<span class="chip warn">Waiting for SAO approval</span>' : `<button class="btn" onclick="P.toggleReg('${id2}',${e.registration !== 'open'})">${e.registration === 'open' ? 'Close registration' : 'Open registration'}</button><button class="btn dark" onclick="P.showQR('${id2}')">Display QR code</button>${e.phase !== 'past' ? `<button class="btn" onclick="P.walkin('${id2}')">Add walk-in</button>` : ''}`}
           <button class="btn ghost" onclick="P.edit('${id2}')">Edit</button><button class="btn ghost" onclick="P.report('${id2}')">Generate attendance report</button><button class="btn ghost" onclick="P.exportPdf('${id2}')">Export PDF</button></div>${e.status === 'rejected' && e.approval_note ? `<p class="hint">Disapproved by SAO. Reason: ${esc(e.approval_note)}</p>` : ''}</div>`;
       const s = data.stats;
-      $('#evStats', el).innerHTML = tilesHtml([['Registered', s.registered + ' / ' + e.seat_limit], ['Seats left', e.seats_left], ['Present', s.present], ['Not yet in', s.pending], ['Attendance', s.rate + '%']]);
+      $('#evStats', el).innerHTML = tilesHtml([['Registered', s.registered + ' / ' + e.seat_limit], ['Walk-ins', s.walk_ins], ['Seats left', e.seats_left], ['Present', s.present], ['Not yet in', s.pending], ['Attendance', s.rate + '%']]);
       const q = P.roster.toLowerCase();
-      $('#evTable', el).innerHTML = attendanceTable(data.rows.filter((r) => !q || (r.name + r.student_id + r.email).toLowerCase().includes(q)));
+      $('#evTable', el).innerHTML = attendanceTable(data.rows.filter((r) => !q || (r.name + r.student_id + r.email).toLowerCase().includes(q)), e.id);
     };
     const load = async () => { data = await api('/api/events/' + id + '/registrations'); paint(); };
     await load();

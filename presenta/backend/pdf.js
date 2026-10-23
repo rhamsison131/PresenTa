@@ -34,6 +34,7 @@ const send = (report, res) => {
     ['Date', fmt(report.event_date)],
     ['School year', report.school_year],
     ['Registered', report.total_registered],
+    ['Walk-ins', report.total_walk_ins || 0],
     ['Present', report.total_present],
     ['Absent', report.total_absent],
     ['Attendance rate', report.rate + '%'],

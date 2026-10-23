@@ -328,3 +328,11 @@ img.brand-mark { width: auto; height: 36px; max-width: 100%; object-fit: contain
   .scan-foot .btn { flex: 1 1 100%; min-width: 0; }
   .ev-form .ef-sec { padding: 14px; }
 }
+.dt { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, .7fr) minmax(0, .7fr) minmax(0, .8fr); gap: 8px; }
+.dt input, .dt select { width: 100%; padding: 11px 10px; border: 1px solid var(--line); border-radius: 12px; font-size: 14px; background: #f8f9ff; font-family: inherit; }
+.dt input:focus, .dt select:focus { outline: none; border-color: var(--pink); background: #fff; }
+@media (max-width: 520px) {
+  .dt { grid-template-columns: 1fr 1fr 1fr; }
+  .dt .dt-d { grid-column: 1 / -1; }
+  .dt input, .dt select { font-size: 16px; }
+}

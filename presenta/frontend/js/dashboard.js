@@ -442,12 +442,54 @@ const Msg = {
   }
 };
 
-function attendanceTable(rows) {
+function attendanceTable(rows, evId) {
   if (!rows.length) return '<div class="empty">No registrations yet</div>';
-  return tableHtml(['Seat', 'Student', 'ID', 'Course', 'Status', 'Checked in'], rows.map((r) => `<tr>
-    <td>${esc(r.seat_no)}</td><td>${esc(r.name)}<small>${esc(r.email)}</small></td><td>${esc(r.student_id)}</td>
+  const heads = ['Seat', 'Student', 'ID', 'Course', 'Status', 'Checked in'];
+  if (evId) heads.push('');
+  return tableHtml(heads, rows.map((r) => `<tr>
+    <td>${r.walk_in ? chip('warn', 'Walk-in') : esc(r.seat_no)}</td><td>${esc(r.name)}<small>${esc(r.email)}</small></td><td>${esc(r.student_id)}</td>
     <td>${esc(r.course)}${r.year ? ' · Y' + esc(r.year) : ''}<small>${esc(r.department)}</small></td>
-    <td>${r.left ? chip('absent', 'Left the venue') : chip(r.attended ? 'present' : 'pending', r.attended ? 'Present' : 'Not yet')}</td><td>${r.attended_at ? esc(fmtT(r.attended_at)) : '—'}</td></tr>`));
+    <td>${r.left ? chip('absent', 'Left the venue') : chip(r.attended ? 'present' : 'pending', r.attended ? 'Present' : 'Not yet')}</td><td>${r.attended_at ? esc(fmtT(r.attended_at)) : '—'}</td>${evId ? `<td>${r.walk_in ? `<button class="btn sm danger" onclick="P.rmWalkin('${esc(evId)}','${esc(r.id)}')">Remove</button>` : ''}</td>` : ''}</tr>`));
+}
+
+const pad2 = (n) => String(n).padStart(2, '0');
+function dtPicker(id, iso, minToday) {
+  const d = iso ? new Date(iso) : new Date();
+  let h = d.getHours();
+  const pm = h >= 12;
+  h = h % 12 || 12;
+  const m = d.getMinutes();
+  const mins = Array.from({ length: 12 }, (_, i) => i * 5);
+  if (!mins.includes(m)) mins.push(m);
+  mins.sort((a, b) => a - b);
+  const today = new Date();
+  const min = minToday ? ` min="${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}"` : '';
+  return `<div class="dt" id="${id}"><input type="date" class="dt-d" value="${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}"${min} required>
+    <select class="dt-h" aria-label="Hour">${Array.from({ length: 12 }, (_, i) => i + 1).map((x) => `<option value="${x}" ${x === h ? 'selected' : ''}>${x}</option>`).join('')}</select>
+    <select class="dt-m" aria-label="Minute">${mins.map((x) => `<option value="${x}" ${x === m ? 'selected' : ''}>${pad2(x)}</option>`).join('')}</select>
+    <select class="dt-p" aria-label="AM or PM"><option ${pm ? '' : 'selected'}>AM</option><option ${pm ? 'selected' : ''}>PM</option></select></div>`;
+}
+function dtGet(root) {
+  const v = $('.dt-d', root).value;
+  if (!v) return null;
+  const [y, mo, da] = v.split('-').map(Number);
+  let h = Number($('.dt-h', root).value) % 12;
+  if ($('.dt-p', root).value === 'PM') h += 12;
+  return new Date(y, mo - 1, da, h, Number($('.dt-m', root).value));
+}
+function dtSet(root, d) {
+  $('.dt-d', root).value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const h = d.getHours();
+  $('.dt-h', root).value = String(h % 12 || 12);
+  const m = d.getMinutes();
+  if (![...$('.dt-m', root).options].some((o) => Number(o.value) === m)) {
+    const o = document.createElement('option');
+    o.value = m;
+    o.textContent = pad2(m);
+    $('.dt-m', root).appendChild(o);
+  }
+  $('.dt-m', root).value = String(m);
+  $('.dt-p', root).value = h >= 12 ? 'PM' : 'AM';
 }
 
 const ReportsUI = {

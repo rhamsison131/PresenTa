@@ -67,6 +67,7 @@ const feeOf = (e) => {
 const present = (e, user) => {
   const out = { ...e };
   delete out.qr_token;
+  delete out.walkin_token;
   const taken = activeRegs(e.id).length;
   out.phase = phaseOf(e);
   out.seats_taken = taken;
@@ -180,21 +181,22 @@ const attendanceRows = (e) =>
     .map((r) => {
       if (r.walk_in) {
         const w = r.walkin || {};
+        const a = r.student_id ? userById(r.student_id) || {} : {};
         return {
           id: r.id,
           seat_no: 'Walk-in',
           walk_in: true,
-          name: w.name || 'Unknown',
-          email: w.email || '',
-          student_id: w.student_id || '',
-          department: w.department || '',
-          course: w.course || '',
-          year: w.year || '',
+          name: a.name || w.name || 'Unknown',
+          email: a.email || w.email || '',
+          student_id: a.student_id || w.student_id || '',
+          department: a.department || w.department || '',
+          course: a.course || w.course || '',
+          year: a.year || w.year || '',
           reserved_at: r.reserved_at,
-          attended: true,
+          attended: Boolean(r.attended),
           attended_at: r.attended_at || null,
-          left: false,
-          left_at: null
+          left: Boolean(r.left_at),
+          left_at: r.left_at || null
         };
       }
       const s = userById(r.student_id) || {};
@@ -277,6 +279,7 @@ const mount = (app) => {
       status: 'draft',
       registration: 'closed',
       qr_token: crypto.randomBytes(12).toString('hex'),
+      walkin_token: crypto.randomBytes(12).toString('hex'),
       created_at: db.now()
     };
     db.data.events.push(e);
@@ -546,7 +549,12 @@ const mount = (app) => {
     if (!e) return;
     if (e.status !== 'published') return res.status(400).json({ message: 'Publish the event to display its QR code' });
     if (!e.geo) return res.status(400).json({ message: 'Set the venue point and check-in radius before displaying the QR code' });
-    const code = 'PRESENTA|' + e.id + '|' + e.qr_token;
+    const walk = req.query.type === 'walkin';
+    if (walk && !e.walkin_token) {
+      e.walkin_token = crypto.randomBytes(12).toString('hex');
+      await db.save();
+    }
+    const code = (walk ? 'PRESENTA-WALKIN|' : 'PRESENTA|') + e.id + '|' + (walk ? e.walkin_token : e.qr_token);
     const image = await QRCode.toDataURL(code, { width: 360, margin: 2 });
     res.json({ code, image });
   }));
@@ -559,7 +567,7 @@ const mount = (app) => {
     if (e.registration !== 'open') return res.status(400).json({ message: 'Registration is closed for this event' });
     if (!eligible(e, u)) return res.status(403).json({ message: 'This event is limited to: ' + e.eligibility });
     const regs = activeRegs(e.id);
-    if (regs.some((r) => r.student_id === u.id)) return res.status(409).json({ message: 'You already have a seat for this event' });
+    if (allRegs(e.id).some((r) => r.student_id === u.id)) return res.status(409).json({ message: 'You already have a seat for this event' });
     if (regs.length >= e.seat_limit) return res.status(409).json({ message: 'No seats left for this event' });
     const used = new Set(regs.map((r) => r.seat_no));
     let seat = 1;
@@ -609,13 +617,14 @@ const mount = (app) => {
   app.post('/api/attendance/scan', authenticate, requireRole('student'), wrap(async (req, res) => {
     const reject = (message, status) => res.status(status || 400).json({ valid: false, message });
     const parts = clean(req.body && req.body.code).split('|');
-    if (parts.length !== 3 || parts[0] !== 'PRESENTA') return reject('Invalid QR code');
+    const walk = parts[0] === 'PRESENTA-WALKIN';
+    if (parts.length !== 3 || (parts[0] !== 'PRESENTA' && !walk)) return reject('Invalid QR code');
     const e = db.data.events.find((x) => x.id === parts[1]);
-    if (!e || e.status !== 'published' || e.qr_token !== parts[2]) return reject('Invalid QR code');
-    const reg = db.data.registrations.find((r) => r.event_id === e.id && r.student_id === req.user.id && r.status === 'reserved');
-    if (!reg) return reject('You have no reserved seat for this event', 403);
-    if (reg.left_at) return reject('You left the venue within 5 minutes of checking in, so your attendance is not valid', 403);
-    if (reg.attended) return reject('Attendance was already recorded', 409);
+    if (!e || e.status !== 'published' || (walk ? !e.walkin_token || e.walkin_token !== parts[2] : e.qr_token !== parts[2])) return reject('Invalid QR code');
+    let reg = db.data.registrations.find((r) => r.event_id === e.id && r.student_id === req.user.id && r.status === 'reserved');
+    if (!reg && !walk) return reject('You have no reserved seat for this event', 403);
+    if (reg && reg.left_at) return reject('You left the venue within 5 minutes of checking in, so your attendance is not valid', 403);
+    if (reg && reg.attended) return reject('Attendance was already recorded', 409);
     const t = Date.now();
     if (t < new Date(e.starts_at) - 60 * 60 * 1000) return reject('Check-in opens one hour before the event starts');
     if (t > new Date(e.ends_at)) return reject('This event has already ended');
@@ -624,10 +633,25 @@ const mount = (app) => {
     if (!here) return reject('Your location is required to check in. Allow location access and try again.');
     const dist = distanceM(here, e.geo);
     if (dist > e.radius_m) return reject('You are about ' + Math.round(dist) + ' m from the venue. Check-in works within ' + e.radius_m + ' m.', 403);
+    if (!reg) {
+      const me = req.user;
+      reg = {
+        id: db.uid('r_'),
+        event_id: e.id,
+        student_id: me.id,
+        walk_in: true,
+        walkin: { name: me.name, student_id: me.student_id || '', email: me.email, department: me.department || '', course: me.course || '', year: me.year || '' },
+        seat_no: 'Walk-in',
+        status: 'reserved',
+        reserved_at: db.now(),
+        attended: false
+      };
+      db.data.registrations.push(reg);
+    }
     reg.attended = true;
     reg.attended_at = db.now();
     await db.save();
-    db.log(req.user, 'attendance', e.title);
+    db.log(req.user, walk && reg.walk_in ? 'attendance_walkin' : 'attendance', e.title);
     db.notify(req.user.id, 'Attendance recorded', 'You were checked in to "' + e.title + '". Stay within the venue for 5 minutes to keep your attendance.');
     res.json({ valid: true, message: 'Attendance recorded', attended_at: reg.attended_at, monitor_until: new Date(t + ATTEND_WINDOW_MS).toISOString(), event: { id: e.id, title: e.title, venue: e.venue } });
   }));

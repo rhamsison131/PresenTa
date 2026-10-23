@@ -282,23 +282,24 @@ const mount = (app) => {
     res.json({ message: 'Edit credits saved', user: db.pub(u) });
   }));
 
-  app.put('/api/admin/profile-window', ...superOnly, wrap(async (req, res) => {
+  app.put('/api/admin/semester', ...superOnly, wrap(async (req, res) => {
     const b = req.body || {};
-    const start = b.start ? new Date(b.start) : null;
-    const end = b.end ? new Date(b.end) : null;
-    if ((start && isNaN(start)) || (end && isNaN(end))) return res.status(400).json({ message: 'Invalid date' });
-    if (Boolean(start) !== Boolean(end)) return res.status(400).json({ message: 'Set both the opening and closing date, or clear both' });
-    if (start && end <= start) return res.status(400).json({ message: 'The closing date must be after the opening date' });
-    db.data.settings.profile_window = { start: start ? start.toISOString() : '', end: end ? end.toISOString() : '' };
+    const start = clean(b.start);
+    const end = clean(b.end);
+    const okDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(new Date(v + 'T00:00:00+08:00'));
+    if ((start && !okDate(start)) || (end && !okDate(end))) return res.status(400).json({ message: 'Invalid date' });
+    if (Boolean(start) !== Boolean(end)) return res.status(400).json({ message: 'Set both the start and end date of the semester, or clear both' });
+    if (start && end <= start) return res.status(400).json({ message: 'The semester must end after it starts' });
+    db.data.settings.semester = { start, end };
     await db.save();
-    const fmt = (d) => d.toLocaleString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' });
-    db.log(req.user, 'profile_window', start ? fmt(start) + ' to ' + fmt(end) : 'cleared');
+    const fmt = (v) => new Date(v + 'T00:00:00+08:00').toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium' });
+    db.log(req.user, 'semester_set', start ? fmt(start) + ' to ' + fmt(end) : 'cleared');
     if (start) {
       db.data.users.filter((u) => u.role === 'student' && u.status !== 'suspended').forEach((u) => {
-        db.notify(u.id, 'Profile update period', 'You can update your information from ' + fmt(start) + ' until ' + fmt(end) + '.');
+        db.notify(u.id, 'New semester period', 'The semester runs from ' + fmt(start) + ' to ' + fmt(end) + '. Your information can be updated before it starts and after it ends, until SAO sets the next semester.');
       });
     }
-    res.json({ message: start ? 'Update period saved' : 'Update period cleared', profile_window: db.data.settings.profile_window });
+    res.json({ message: start ? 'Semester saved' : 'Semester cleared', semester: db.data.settings.semester });
   }));
 
   const canMessage = [authenticate, (req, res, next) =>

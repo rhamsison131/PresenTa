@@ -8,9 +8,9 @@ const P = {
 
   act(e) {
     if (e.my_reg) {
-      if (e.phase === 'upcoming') return `<span class="chip ok">Seat ${e.my_reg.seat_no}</span><button class="btn sm ghost" onclick="event.stopPropagation();P.cancel('${esc(e.id)}')">Cancel seat</button>`;
-      if (e.phase === 'live') return `<span class="chip ok">Seat ${e.my_reg.seat_no}</span><a class="btn sm" href="#scan" onclick="event.stopPropagation()">Scan QR</a>`;
-      return `<span class="chip ok">Seat ${e.my_reg.seat_no}</span>`;
+      if (e.phase === 'upcoming') return `<span class="chip ok">${e.my_reg.walk_in ? 'Walk-in' : 'Seat ' + e.my_reg.seat_no}</span><button class="btn sm ghost" onclick="event.stopPropagation();P.cancel('${esc(e.id)}')">Cancel seat</button>`;
+      if (e.phase === 'live') return `<span class="chip ok">${e.my_reg.walk_in ? 'Walk-in' : 'Seat ' + e.my_reg.seat_no}</span><a class="btn sm" href="#scan" onclick="event.stopPropagation()">Scan QR</a>`;
+      return `<span class="chip ok">${e.my_reg.walk_in ? 'Walk-in' : 'Seat ' + e.my_reg.seat_no}</span>`;
     }
     if (e.phase === 'past') return chip('past', 'Ended');
     if (!e.eligible) return chip('warn', 'View only');

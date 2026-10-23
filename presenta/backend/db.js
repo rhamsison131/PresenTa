@@ -63,7 +63,7 @@ const normalize = () => {
     wallet_qr: '',
     paid_rate: 5,
     free_fee: 100,
-    profile_window: { start: '', end: '' },
+    semester: { start: '', end: '' },
     ...data.settings
   };
   data.users.forEach((u) => {
@@ -133,11 +133,19 @@ const notify = (userId, title, message) => {
 };
 
 const windowState = () => {
-  const w = data.settings.profile_window || {};
-  const s = w.start ? new Date(w.start).getTime() : NaN;
-  const e = w.end ? new Date(w.end).getTime() : NaN;
+  const sem = data.settings.semester || {};
+  const s = sem.start ? new Date(sem.start + 'T00:00:00+08:00').getTime() : NaN;
+  const e = sem.end ? new Date(sem.end + 'T23:59:59.999+08:00').getTime() : NaN;
   const t = Date.now();
-  return { open: !isNaN(s) && !isNaN(e) && t >= s && t <= e, start: w.start || '', end: w.end || '' };
+  const set = !isNaN(s) && !isNaN(e);
+  const during = set && t >= s && t <= e;
+  return {
+    open: !during,
+    state: !set ? 'none' : during ? 'during' : t < s ? 'before' : 'after',
+    start: sem.start || '',
+    end: sem.end || '',
+    locks_at: set && t < s ? new Date(s).toISOString() : ''
+  };
 };
 
 const sweepAccreditation = () => {
@@ -167,7 +175,9 @@ const pub = (u) => {
     profile_locked,
     edit_credits: u.edit_credits || 0,
     profile_window_open: win.open,
-    profile_window_end: win.end,
+    profile_window_end: win.locks_at,
+    semester_start: win.start,
+    semester_end: win.end,
     member_org_name: member ? member.name : '',
     org_name: org ? org.name : null,
     org_status: org ? org.status : null,

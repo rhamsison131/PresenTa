@@ -178,27 +178,6 @@ const P = {
     return P.pay(id);
   },
 
-  walkin(id) {
-    const dept = '<option value="">Select department</option>' + DEPARTMENTS.map((d) => `<option>${esc(d)}</option>`).join('');
-    const yr = '<option value="">Select year level</option>' + YEARS.map((y) => `<option value="${y}">Year ${y}</option>`).join('');
-    const m = modal('Add walk-in attendee', `<form id="wiForm"><div class="form-grid">
-      <div class="f"><label for="wId">Student ID (optional)</label><input id="wId" maxlength="40"></div>
-      <div class="f"><label for="wName">Full name</label><input id="wName" maxlength="120" required></div>
-      <div class="f"><label for="wDept">Department</label><select id="wDept">${dept}</select></div>
-      <div class="f"><label for="wCourse">Course</label><input id="wCourse" maxlength="80" placeholder="e.g. BSIT"></div>
-      <div class="f"><label for="wYear">Year level</label><select id="wYear">${yr}</select></div>
-      <div class="f"><label for="wEmail">Email (optional)</label><input id="wEmail" type="email" maxlength="120"></div></div>
-      <p class="hint">The attendee is marked present right away and does not use a seat. If the student ID belongs to a student who already reserved a seat, that seat is marked present instead.</p>
-      <div class="modal-actions"><button type="button" class="btn ghost" id="wCancel">Cancel</button><button class="btn" type="submit">Add walk-in</button></div></form>`);
-    $('#wCancel', m.el).onclick = m.close;
-    $('#wiForm', m.el).onsubmit = async (e) => {
-      e.preventDefault();
-      const body = { student_id: $('#wId', m.el).value, name: $('#wName', m.el).value, department: $('#wDept', m.el).value, course: $('#wCourse', m.el).value, year: $('#wYear', m.el).value, email: $('#wEmail', m.el).value };
-      const r = await run($('button[type=submit]', m.el), () => api('/api/events/' + id + '/walkin', { method: 'POST', body }), (x) => x.message);
-      if (r) { m.close(); refresh(); }
-    };
-  },
-
   async rmWalkin(id, rid) {
     if (!(await confirmBox('Remove walk-in', 'Remove this walk-in from the attendance list?', 'Remove', true))) return;
     const r = await run(null, () => api('/api/events/' + id + '/walkin/' + rid, { method: 'DELETE' }), 'Walk-in removed');
@@ -273,7 +252,7 @@ const P = {
         <h3 style="margin:10px 0 6px;font-size:20px">${esc(e.title)}</h3><div style="font-size:13px;color:var(--muted)">${esc(e.venue)} · ${esc(fmtDT(e.starts_at))} – ${esc(fmtT(e.ends_at))} · ${e.geo ? 'Check-in within ' + esc(e.radius_m) + ' m' : '<span style="color:var(--bad)">Venue point not set</span>'}</div></div>
         <a class="btn ghost" href="#events">Back to events</a></div>
         <div class="page-actions">
-          ${e.status === 'draft' || e.status === 'rejected' ? `<button class="btn" onclick="P.submit('${id2}')">Pay and submit</button>` : e.status === 'pending' ? '<span class="chip warn">Waiting for SAO approval</span>' : `<button class="btn" onclick="P.toggleReg('${id2}',${e.registration !== 'open'})">${e.registration === 'open' ? 'Close registration' : 'Open registration'}</button><button class="btn dark" onclick="P.showQR('${id2}')">Display QR code</button>${e.phase !== 'past' ? `<button class="btn" onclick="P.walkin('${id2}')">Add walk-in</button>` : ''}`}
+          ${e.status === 'draft' || e.status === 'rejected' ? `<button class="btn" onclick="P.submit('${id2}')">Pay and submit</button>` : e.status === 'pending' ? '<span class="chip warn">Waiting for SAO approval</span>' : `<button class="btn" onclick="P.toggleReg('${id2}',${e.registration !== 'open'})">${e.registration === 'open' ? 'Close registration' : 'Open registration'}</button><button class="btn dark" onclick="P.showQR('${id2}')">Display QR code</button>${e.phase !== 'past' ? `<button class="btn dark" onclick="P.showQR('${id2}','walkin')">Display walk-in QR</button>` : ''}`}
           <button class="btn ghost" onclick="P.edit('${id2}')">Edit</button><button class="btn ghost" onclick="P.report('${id2}')">Generate attendance report</button><button class="btn ghost" onclick="P.exportPdf('${id2}')">Export PDF</button></div>${e.status === 'rejected' && e.approval_note ? `<p class="hint">Disapproved by SAO. Reason: ${esc(e.approval_note)}</p>` : ''}</div>`;
       const s = data.stats;
       $('#evStats', el).innerHTML = tilesHtml([['Registered', s.registered + ' / ' + e.seat_limit], ['Walk-ins', s.walk_ins], ['Seats left', e.seats_left], ['Present', s.present], ['Not yet in', s.pending], ['Attendance', s.rate + '%']]);
@@ -287,13 +266,17 @@ const P = {
     App.cleanup = () => clearInterval(t);
   },
 
-  async showQR(id) {
+  async showQR(id, type) {
     const card = $('#qrCard');
     if (!card) return;
-    if (!card.classList.contains('hidden')) { card.classList.add('hidden'); return; }
+    const t = type || 'event';
+    if (!card.classList.contains('hidden') && card.dataset.type === t) { card.classList.add('hidden'); return; }
     try {
-      const q = P.qrCache[id] || (P.qrCache[id] = await api('/api/events/' + id + '/qr'));
-      card.innerHTML = `<h3>Event QR code</h3><div class="qr-box"><img src="${q.image}" alt="Event QR code"><div style="flex:1;min-width:220px"><p style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:10px">Students scan this code from their dashboard to confirm attendance. Check-in opens one hour before the start time.</p><div class="code">${esc(q.code)}</div></div></div>`;
+      const key = id + ':' + t;
+      const q = P.qrCache[key] || (P.qrCache[key] = await api('/api/events/' + id + '/qr' + (t === 'walkin' ? '?type=walkin' : '')));
+      const walk = t === 'walkin';
+      card.innerHTML = `<h3>${walk ? 'Walk-in QR code' : 'Event QR code'}</h3><div class="qr-box"><img src="${q.image}" alt="${walk ? 'Walk-in QR code' : 'Event QR code'}"><div style="flex:1;min-width:220px"><p style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:10px">${walk ? 'For students who did not reserve a seat. They scan this code from their dashboard and are recorded as walk-ins. No seat is used.' : 'Students scan this code from their dashboard to confirm attendance. Check-in opens one hour before the start time.'}</p><div class="code">${esc(q.code)}</div></div></div>`;
+      card.dataset.type = t;
       card.classList.remove('hidden');
     } catch (e) {
       toast(e.message, 'err');

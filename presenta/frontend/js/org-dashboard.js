@@ -1,7 +1,6 @@
 const prep = async () => {
   try {
     Session.setUser((await api('/api/me')).user);
-    P.settings = await api('/api/settings');
     P.orgs = await api('/api/public/orgs');
   } catch (e) {
     return;
@@ -10,7 +9,6 @@ const prep = async () => {
 
 const P = {
   tab: 'active',
-  settings: { paid_rate: 5, free_fee: 100 },
   orgs: [],
   q: '',
   cat: '',
@@ -21,10 +19,8 @@ const P = {
   form(ev) {
     const v = ev || {};
     const now = Date.now();
-    const tmr = new Date(now + 86400000);
-    tmr.setHours(8, 0, 0, 0);
-    const start = v.starts_at || tmr.toISOString();
-    const end = v.ends_at || new Date(tmr.getTime() + 7200000).toISOString();
+    const start = v.starts_at ? toLocalInput(v.starts_at) : toLocalInput(new Date(now + 86400000).toISOString());
+    const end = v.ends_at ? toLocalInput(v.ends_at) : toLocalInput(new Date(now + 86400000 + 7200000).toISOString());
     const me = Session.user || {};
     const deptLocked = Boolean(me.org_department);
     const aud = v.audience || { department: 'All', year: 'All', org_id: '' };
@@ -44,12 +40,11 @@ const P = {
         <div class="f full"><label for="fDesc">Description</label><textarea id="fDesc" placeholder="What is this event about?">${esc(v.description || '')}</textarea></div>
       </div></section>
       <section class="ef-sec"><h4><i>2</i>Schedule and capacity</h4><div class="form-grid">
-        <div class="f full"><label>Starts</label>${dtPicker('fStart', start, !ev)}</div>
-        <div class="f full"><label>Ends</label>${dtPicker('fEnd', end, !ev)}</div>
+        <div class="f"><label for="fStart">Starts</label><input id="fStart" type="datetime-local" value="${start}" required></div>
+        <div class="f"><label for="fEnd">Ends</label><input id="fEnd" type="datetime-local" value="${end}" required></div>
         <div class="f"><label for="fSeats">Seat limit</label><input id="fSeats" type="number" min="1" value="${esc(v.seat_limit || 50)}" required></div>
         <div class="f"><label for="fPrice">Ticket price (₱)</label><input id="fPrice" type="number" min="1" step="0.01" value="${esc(v.ticket_price || '')}" ${v.is_paid ? '' : 'disabled'} ${locked ? 'readonly' : ''}></div>
         <label class="ef-check full"><input type="checkbox" id="fPaid" ${v.is_paid ? 'checked' : ''} ${locked ? 'disabled' : ''}><span>This is a paid event <small>(organizers collect fees themselves, outside Presenta)</small></span></label>
-        <div class="f full"><div class="ef-note" id="fFee"></div></div>
       </div></section>
       <section class="ef-sec"><h4><i>3</i>Attendance location</h4><div class="form-grid">
         <div class="f"><label for="fRadius">Check-in radius (meters)</label><input id="fRadius" type="number" min="5" max="1000" step="1" value="${esc(v.radius_m || 50)}" required></div>
@@ -58,18 +53,11 @@ const P = {
         <input type="hidden" id="fLat" value="${esc(g.lat)}"><input type="hidden" id="fLng" value="${esc(g.lng)}">
       </div></section>
       <section class="ef-sec"><h4><i>4</i>Audience</h4><div class="form-grid">${audience}</div></section>
-      ${ev ? '' : '<label class="ef-check ef-pay"><input type="checkbox" id="fPub" checked><span>Continue to payment after saving</span></label>'}
+      ${ev ? '' : '<label class="ef-check ef-pay"><input type="checkbox" id="fPub" checked><span>Submit for SAO approval after saving</span></label>'}
       <div class="modal-actions"><button type="button" class="btn ghost" id="fCancel">Cancel</button><button class="btn" type="submit">${ev ? 'Save changes' : 'Save event'}</button></div>
     </form>`, { wide: true });
     const fee = () => {
-      const paid = $('#fPaid', m.el).checked;
-      $('#fPrice', m.el).disabled = !paid || locked;
-      const st = P.settings;
-      const seats = Number($('#fSeats', m.el).value) || 0;
-      const price = Number($('#fPrice', m.el).value) || 0;
-      $('#fFee', m.el).textContent = paid
-        ? 'Platform fee: ' + st.paid_rate + '% of ₱' + price + ' × ' + seats + ' seats = ₱' + (Math.round(price * seats * st.paid_rate) / 100).toFixed(2) + '. Paid to the SAO wallet before approval.'
-        : 'Platform fee for a free event: ₱' + st.free_fee + ' per event. Paid to the SAO wallet before approval.';
+      $('#fPrice', m.el).disabled = !$('#fPaid', m.el).checked || locked;
     };
     const geoNote = () => {
       const la = $('#fLat', m.el).value;
@@ -99,30 +87,12 @@ const P = {
     fee();
     geoNote();
     $('#fCancel', m.el).onclick = m.close;
-    let span = new Date(end) - new Date(start);
-    const syncEnd = () => {
-      const a = dtGet($('#fStart', m.el));
-      if (!a) return;
-      dtSet($('#fEnd', m.el), new Date(a.getTime() + (span > 0 ? span : 7200000)));
-      $('.dt-d', $('#fEnd', m.el)).min = $('.dt-d', $('#fStart', m.el)).value;
-    };
-    $('#fStart', m.el).addEventListener('change', syncEnd);
-    $('#fEnd', m.el).addEventListener('change', () => {
-      const a = dtGet($('#fStart', m.el));
-      const b = dtGet($('#fEnd', m.el));
-      if (a && b) span = b - a;
-    });
     $('#evForm', m.el).onsubmit = async (e) => {
       e.preventDefault();
-      const sd = dtGet($('#fStart', m.el));
-      const ed = dtGet($('#fEnd', m.el));
-      if (!sd || !ed) return toast('Choose the start and end date', 'err');
-      if (!ev && sd.getTime() < Date.now()) return toast('The start time cannot be in the past', 'err');
-      if (ed <= sd) return toast('The end time must be after the start time', 'err');
       const paid = $('#fPaid', m.el).checked;
       const body = {
         title: $('#fTitle', m.el).value, category: $('#fCat', m.el).value, venue: $('#fVenue', m.el).value,
-        starts_at: sd.toISOString(), ends_at: ed.toISOString(),
+        starts_at: new Date($('#fStart', m.el).value).toISOString(), ends_at: new Date($('#fEnd', m.el).value).toISOString(),
         seat_limit: $('#fSeats', m.el).value, is_paid: paid, ticket_price: paid ? $('#fPrice', m.el).value : 0,
         aud_department: $('#fAudDept', m.el).value, aud_year: $('#fAudYear', m.el).value, aud_org: $('#fAudOrg', m.el).value,
         description: $('#fDesc', m.el).value,
@@ -133,32 +103,8 @@ const P = {
       if (r) {
         m.close();
         refresh();
-        if (goPay) P.pay(r.id);
+        if (goPay) P.submit(r.id);
       }
-    };
-  },
-
-  async pay(id) {
-    const [d, st] = await Promise.all([run(null, () => api('/api/events/' + id + '/registrations')), api('/api/settings')]);
-    if (!d) return;
-    const e = d.event;
-    const detail = `<div class="detail"><div>${icon('calendar', 16)}<span><b>${esc(e.title)}</b></span></div>
-      <div>${icon('card', 16)}<span>${e.is_paid ? 'Paid event · ' + esc(st.paid_rate) + '% of ₱' + esc(e.ticket_price) + ' × ' + esc(e.seat_limit) + ' seats' : 'Free event · flat fee per event'}</span></div></div>
-      <div style="font-size:26px;font-weight:700;margin:12px 0">₱${esc(e.fee_due)}</div>`;
-    if (!st.wallet_qr) {
-      modal('Pay event fee', detail + '<p class="hint">SAO has not set up the payment wallet yet. Please try again later.</p>');
-      return;
-    }
-    const m = modal('Pay event fee', `${detail}
-      <div style="text-align:center"><img src="${esc(st.wallet_qr)}" alt="Wallet QR" style="max-width:220px;width:100%;border-radius:12px;border:1px solid var(--line)"><div style="font-size:13px;margin-top:8px"><b>${esc(st.wallet_name)}</b> ${esc(st.wallet_number)}</div></div>
-      <p class="hint">Scan the QR with your wallet app and pay the exact amount. Then enter the reference number from your receipt. SAO will approve or disapprove the event after checking the payment.</p>
-      <form id="payForm"><div class="form-grid"><div class="f"><label>Payment reference number</label><input id="pRef" required minlength="4"></div><div class="f"><label>Sender name (optional)</label><input id="pPayer"></div></div>
-      <div class="modal-actions"><button type="button" class="btn ghost" id="pCancel">Later</button><button class="btn" type="submit">I have paid, submit for approval</button></div></form>`);
-    $('#pCancel', m.el).onclick = m.close;
-    $('#payForm', m.el).onsubmit = async (ev) => {
-      ev.preventDefault();
-      const r = await run($('button[type=submit]', m.el), () => api('/api/events/' + id + '/submit', { method: 'POST', body: { reference: $('#pRef', m.el).value, payer: $('#pPayer', m.el).value } }), 'Event submitted for SAO approval');
-      if (r) { m.close(); refresh(); }
     };
   },
 
@@ -174,13 +120,9 @@ const P = {
     P.form(e);
   },
 
-  submit(id) {
-    return P.pay(id);
-  },
-
-  async rmWalkin(id, rid) {
-    if (!(await confirmBox('Remove walk-in', 'Remove this walk-in from the attendance list?', 'Remove', true))) return;
-    const r = await run(null, () => api('/api/events/' + id + '/walkin/' + rid, { method: 'DELETE' }), 'Walk-in removed');
+  async submit(id) {
+    if (!(await confirmBox('Submit for approval', 'Submit this event for SAO approval? You will not be able to edit it until SAO decides.', 'Submit'))) return;
+    const r = await run(null, () => api('/api/events/' + id + '/submit', { method: 'POST' }), 'Event submitted for SAO approval');
     if (r) refresh();
   },
 
@@ -208,7 +150,7 @@ const P = {
   acts(e) {
     const id = esc(e.id);
     let h = `<a class="btn sm" href="#event/${id}">Manage</a>`;
-    if (e.status === 'draft' || e.status === 'rejected') h += `<button class="btn sm ghost" onclick="P.submit('${id}')">Pay and submit</button>`;
+    if (e.status === 'draft' || e.status === 'rejected') h += `<button class="btn sm ghost" onclick="P.submit('${id}')">Submit for approval</button>`;
     if (e.status === 'rejected' && e.approval_note) h += `<small style="max-width:200px">Reason: ${esc(e.approval_note)}</small>`;
     h += `<button class="btn sm ghost" onclick="P.edit('${id}')">Edit</button>`;
     if (e.status === 'draft' || !e.seats_taken) h += `<button class="btn sm danger" onclick="P.remove('${id}')">Delete</button>`;
@@ -252,12 +194,12 @@ const P = {
         <h3 style="margin:10px 0 6px;font-size:20px">${esc(e.title)}</h3><div style="font-size:13px;color:var(--muted)">${esc(e.venue)} · ${esc(fmtDT(e.starts_at))} – ${esc(fmtT(e.ends_at))} · ${e.geo ? 'Check-in within ' + esc(e.radius_m) + ' m' : '<span style="color:var(--bad)">Venue point not set</span>'}</div></div>
         <a class="btn ghost" href="#events">Back to events</a></div>
         <div class="page-actions">
-          ${e.status === 'draft' || e.status === 'rejected' ? `<button class="btn" onclick="P.submit('${id2}')">Pay and submit</button>` : e.status === 'pending' ? '<span class="chip warn">Waiting for SAO approval</span>' : `<button class="btn" onclick="P.toggleReg('${id2}',${e.registration !== 'open'})">${e.registration === 'open' ? 'Close registration' : 'Open registration'}</button><button class="btn dark" onclick="P.showQR('${id2}')">Display QR code</button>${e.phase !== 'past' ? `<button class="btn dark" onclick="P.showQR('${id2}','walkin')">Display walk-in QR</button>` : ''}`}
+          ${e.status === 'draft' || e.status === 'rejected' ? `<button class="btn" onclick="P.submit('${id2}')">Submit for approval</button>` : e.status === 'pending' ? '<span class="chip warn">Waiting for SAO approval</span>' : `<button class="btn" onclick="P.toggleReg('${id2}',${e.registration !== 'open'})">${e.registration === 'open' ? 'Close registration' : 'Open registration'}</button><button class="btn dark" onclick="P.showQR('${id2}')">Display QR code</button>`}
           <button class="btn ghost" onclick="P.edit('${id2}')">Edit</button><button class="btn ghost" onclick="P.report('${id2}')">Generate attendance report</button><button class="btn ghost" onclick="P.exportPdf('${id2}')">Export PDF</button></div>${e.status === 'rejected' && e.approval_note ? `<p class="hint">Disapproved by SAO. Reason: ${esc(e.approval_note)}</p>` : ''}</div>`;
       const s = data.stats;
-      $('#evStats', el).innerHTML = tilesHtml([['Registered', s.registered + ' / ' + e.seat_limit], ['Walk-ins', s.walk_ins], ['Seats left', e.seats_left], ['Present', s.present], ['Not yet in', s.pending], ['Attendance', s.rate + '%']]);
+      $('#evStats', el).innerHTML = tilesHtml([['Registered', s.registered + ' / ' + e.seat_limit], ['Seats left', e.seats_left], ['Present', s.present], ['Not yet in', s.pending], ['Attendance', s.rate + '%']]);
       const q = P.roster.toLowerCase();
-      $('#evTable', el).innerHTML = attendanceTable(data.rows.filter((r) => !q || (r.name + r.student_id + r.email).toLowerCase().includes(q)), e.id);
+      $('#evTable', el).innerHTML = attendanceTable(data.rows.filter((r) => !q || (r.name + r.student_id + r.email).toLowerCase().includes(q)));
     };
     const load = async () => { data = await api('/api/events/' + id + '/registrations'); paint(); };
     await load();
@@ -266,17 +208,13 @@ const P = {
     App.cleanup = () => clearInterval(t);
   },
 
-  async showQR(id, type) {
+  async showQR(id) {
     const card = $('#qrCard');
     if (!card) return;
-    const t = type || 'event';
-    if (!card.classList.contains('hidden') && card.dataset.type === t) { card.classList.add('hidden'); return; }
+    if (!card.classList.contains('hidden')) { card.classList.add('hidden'); return; }
     try {
-      const key = id + ':' + t;
-      const q = P.qrCache[key] || (P.qrCache[key] = await api('/api/events/' + id + '/qr' + (t === 'walkin' ? '?type=walkin' : '')));
-      const walk = t === 'walkin';
-      card.innerHTML = `<h3>${walk ? 'Walk-in QR code' : 'Event QR code'}</h3><div class="qr-box"><img src="${q.image}" alt="${walk ? 'Walk-in QR code' : 'Event QR code'}"><div style="flex:1;min-width:220px"><p style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:10px">${walk ? 'For students who did not reserve a seat. They scan this code from their dashboard and are recorded as walk-ins. No seat is used.' : 'Students scan this code from their dashboard to confirm attendance. Check-in opens one hour before the start time.'}</p><div class="code">${esc(q.code)}</div></div></div>`;
-      card.dataset.type = t;
+      const q = P.qrCache[id] || (P.qrCache[id] = await api('/api/events/' + id + '/qr'));
+      card.innerHTML = `<h3>Event QR code</h3><div class="qr-box"><img src="${q.image}" alt="Event QR code"><div style="flex:1;min-width:220px"><p style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:10px">Students scan this code from their dashboard to confirm attendance. Check-in opens one hour before the start time.</p><div class="code">${esc(q.code)}</div></div></div>`;
       card.classList.remove('hidden');
     } catch (e) {
       toast(e.message, 'err');

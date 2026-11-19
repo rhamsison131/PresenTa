@@ -198,7 +198,7 @@ function eventRow(e, actions) {
   return `<div class="ev-row" data-id="${esc(e.id)}">
     <div class="ev-cover" style="background:${coverOf(e.category)}">${esc((e.title || 'E').charAt(0).toUpperCase())}</div>
     <div class="ev-main"><span class="chip">${esc(e.category)}</span> ${chip(e.phase, PHASE[e.phase])} ${e.is_paid ? chip('warn', 'Paid ₱' + e.ticket_price) : chip('ok', 'Free')}<h4>${esc(e.title)}</h4><p>${esc(e.description || e.org_name)}</p></div>
-    <div class="ev-meta"><div>${icon('pin', 14)}<span>${esc(e.venue)}</span></div>${e.payment ? `<div>${icon('card', 14)}<span>Fee ₱${esc(e.payment.amount)} · Ref ${esc(e.payment.reference)}</span></div>` : ''}<div>${icon('users', 14)}<span>${esc(e.eligibility || 'All')}</span></div><div>${icon('calendar', 14)}<span>${esc(fmtDT(e.starts_at))}</span></div>${e.letters_request && e.status === 'pending' ? `<div>${icon('file', 14)}<span>Letters needed: ${esc(e.letters_request.note)}</span></div>` : ''}${e.org_name ? `<div>${icon('building', 14)}<span>${esc(e.org_name)}</span></div>` : ''}</div>
+    <div class="ev-meta"><div>${icon('pin', 14)}<span>${esc(e.venue)}</span></div><div>${icon('users', 14)}<span>${esc(e.eligibility || 'All')}</span></div><div>${icon('calendar', 14)}<span>${esc(fmtDT(e.starts_at))}</span></div>${e.org_name ? `<div>${icon('building', 14)}<span>${esc(e.org_name)}</span></div>` : ''}</div>
     <div class="ev-seats"><div class="bar"><i style="width:${pct}%"></i></div><small>${pct}% seats filled</small></div>
     <div class="ev-left"><b>${e.seats_left}</b><small>Seats left</small></div>
     <div class="ev-act">${actions || ''}</div>
@@ -248,38 +248,10 @@ function mountShell(cfg) {
   document.addEventListener('mousedown', (e) => {
     if (!e.target.closest('#panel') && !e.target.closest('#bell')) $('#panel').classList.add('hidden');
   });
-  window.addEventListener('hashchange', () => route());
+  window.addEventListener('hashchange', route);
   route();
   pollNotifs();
   setInterval(pollNotifs, 30000);
-  livePulse();
-  setInterval(livePulse, 4000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) livePulse(); });
-}
-
-let liveRev = null;
-let liveBusy = false;
-async function livePulse() {
-  if (liveBusy || document.hidden) return;
-  liveBusy = true;
-  try {
-    const d = await api('/api/pulse');
-    if (liveRev === null) {
-      liveRev = d.rev;
-    } else if (d.rev !== liveRev) {
-      pollNotifs();
-      const tag = (document.activeElement && document.activeElement.tagName) || '';
-      const busy = /^(INPUT|TEXTAREA|SELECT)$/.test(tag) || $('.overlay') || App.cleanup;
-      if (!busy) {
-        liveRev = d.rev;
-        route(true);
-      }
-    }
-  } catch (e) {
-    return;
-  } finally {
-    liveBusy = false;
-  }
 }
 
 function paintUser() {
@@ -289,31 +261,30 @@ function paintUser() {
   $('#whoSub').textContent = (u.role === 'organization' && u.org_name) || ROLE_LABEL[u.role] || '';
 }
 
-async function route(silent) {
+async function route() {
   const parts = (location.hash.slice(1) || App.home).split('/');
   const id = App.views[parts[0]] ? parts[0] : App.home;
   const v = App.views[id];
   const seq = ++App.seq;
-  if (!silent) {
-    if (App.cleanup) {
-      App.cleanup();
-      App.cleanup = null;
-    }
-    closeModals();
+  if (App.cleanup) {
+    App.cleanup();
+    App.cleanup = null;
   }
+  closeModals();
   $$('[data-nav]').forEach((a) => a.classList.toggle('on', a.dataset.nav === (v.nav || id)));
   $('#title').textContent = v.title;
   $('#crumb').textContent = 'Dashboard / ' + v.title;
   const el = $('#view');
-  if (!silent) el.innerHTML = '<div class="loading">Loading…</div>';
+  el.innerHTML = '<div class="loading">Loading…</div>';
   try {
     const out = document.createElement('div');
     await v.render(out, parts[1]);
     if (seq !== App.seq) return;
-    el.replaceChildren(out);
+    el.innerHTML = '';
+    el.appendChild(out);
     if (v.after) v.after(out, parts[1]);
   } catch (e) {
-    if (seq === App.seq && !silent) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    if (seq === App.seq) el.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
 }
 
@@ -371,7 +342,7 @@ async function profileView(el) {
   const field = (id, lab, val, o) => `<div class="f"><label for="${id}">${lab}</label><input id="${id}" value="${esc(val)}" ${o && o.fixed ? 'readonly' : ro} ${o && o.type ? 'type="' + o.type + '"' : ''} ${o && o.ph && !locked ? 'placeholder="' + esc(o.ph) + '"' : ''}></div>`;
   const orgPick = `<div class="f"><label for="pMember">Organization (optional)</label><select id="pMember" ${dis}><option value="">None</option>${orgs.map((o) => `<option value="${esc(o.id)}" ${o.id === me.member_org_id ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select></div>`;
   const lockNote = `<div class="note-lock">${icon('shield', 18)}<div><b>Verified by SAO</b><span>Your profile has been approved, so it can no longer be edited. Please contact SAO if something needs to be corrected.</span></div></div>`;
-  const windowNote = `<div class="note-lock">${icon('clock', 18)}<div><b>Update period is open</b><span>${me.profile_window_end ? 'You can update your information until the semester starts on ' + esc(fmtD(me.profile_window_end)) + '.' : 'You can update your information until SAO sets the next semester.'}</span></div></div>`;
+  const windowNote = `<div class="note-lock">${icon('clock', 18)}<div><b>Update period is open</b><span>You can update your information until ${esc(fmtDT(me.profile_window_end))}.</span></div></div>`;
   const creditNote = `<div class="note-lock">${icon('key', 18)}<div><b>Edit credits: ${esc(me.edit_credits || 0)}</b><span>Each saved change uses one credit.</span></div></div>`;
   const notice = locked ? lockNote : me.profile_window_open ? windowNote : me.edit_credits ? creditNote : '';
   el.innerHTML = `<form class="card profile-card" id="profileForm" novalidate><h3>Profile</h3>${notice}<div class="form-grid">
@@ -442,54 +413,12 @@ const Msg = {
   }
 };
 
-function attendanceTable(rows, evId) {
+function attendanceTable(rows) {
   if (!rows.length) return '<div class="empty">No registrations yet</div>';
-  const heads = ['Seat', 'Student', 'ID', 'Course', 'Status', 'Checked in'];
-  if (evId) heads.push('');
-  return tableHtml(heads, rows.map((r) => `<tr>
-    <td>${r.walk_in ? chip('warn', 'Walk-in') : esc(r.seat_no)}</td><td>${esc(r.name)}<small>${esc(r.email)}</small></td><td>${esc(r.student_id)}</td>
+  return tableHtml(['Seat', 'Student', 'ID', 'Course', 'Status', 'Checked in'], rows.map((r) => `<tr>
+    <td>${esc(r.seat_no)}</td><td>${esc(r.name)}<small>${esc(r.email)}</small></td><td>${esc(r.student_id)}</td>
     <td>${esc(r.course)}${r.year ? ' · Y' + esc(r.year) : ''}<small>${esc(r.department)}</small></td>
-    <td>${r.left ? chip('absent', 'Left the venue') : chip(r.attended ? 'present' : 'pending', r.attended ? 'Present' : 'Not yet')}</td><td>${r.attended_at ? esc(fmtT(r.attended_at)) : '—'}</td>${evId ? `<td>${r.walk_in ? `<button class="btn sm danger" onclick="P.rmWalkin('${esc(evId)}','${esc(r.id)}')">Remove</button>` : ''}</td>` : ''}</tr>`));
-}
-
-const pad2 = (n) => String(n).padStart(2, '0');
-function dtPicker(id, iso, minToday) {
-  const d = iso ? new Date(iso) : new Date();
-  let h = d.getHours();
-  const pm = h >= 12;
-  h = h % 12 || 12;
-  const m = d.getMinutes();
-  const mins = Array.from({ length: 12 }, (_, i) => i * 5);
-  if (!mins.includes(m)) mins.push(m);
-  mins.sort((a, b) => a - b);
-  const today = new Date();
-  const min = minToday ? ` min="${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}"` : '';
-  return `<div class="dt" id="${id}"><input type="date" class="dt-d" value="${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}"${min} required>
-    <select class="dt-h" aria-label="Hour">${Array.from({ length: 12 }, (_, i) => i + 1).map((x) => `<option value="${x}" ${x === h ? 'selected' : ''}>${x}</option>`).join('')}</select>
-    <select class="dt-m" aria-label="Minute">${mins.map((x) => `<option value="${x}" ${x === m ? 'selected' : ''}>${pad2(x)}</option>`).join('')}</select>
-    <select class="dt-p" aria-label="AM or PM"><option ${pm ? '' : 'selected'}>AM</option><option ${pm ? 'selected' : ''}>PM</option></select></div>`;
-}
-function dtGet(root) {
-  const v = $('.dt-d', root).value;
-  if (!v) return null;
-  const [y, mo, da] = v.split('-').map(Number);
-  let h = Number($('.dt-h', root).value) % 12;
-  if ($('.dt-p', root).value === 'PM') h += 12;
-  return new Date(y, mo - 1, da, h, Number($('.dt-m', root).value));
-}
-function dtSet(root, d) {
-  $('.dt-d', root).value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-  const h = d.getHours();
-  $('.dt-h', root).value = String(h % 12 || 12);
-  const m = d.getMinutes();
-  if (![...$('.dt-m', root).options].some((o) => Number(o.value) === m)) {
-    const o = document.createElement('option');
-    o.value = m;
-    o.textContent = pad2(m);
-    $('.dt-m', root).appendChild(o);
-  }
-  $('.dt-m', root).value = String(m);
-  $('.dt-p', root).value = h >= 12 ? 'PM' : 'AM';
+    <td>${r.left ? chip('absent', 'Left the venue') : chip(r.attended ? 'present' : 'pending', r.attended ? 'Present' : 'Not yet')}</td><td>${r.attended_at ? esc(fmtT(r.attended_at)) : '—'}</td></tr>`));
 }
 
 const ReportsUI = {
@@ -526,26 +455,16 @@ const ApprovalsUI = {
   async decide(id, decision) {
     const ev = ApprovalsUI.list.find((x) => x.id === id);
     const title = ev ? `<b>${esc(ev.title)}</b>${ev.org_name ? ' · ' + esc(ev.org_name) : ''}<br>` : '';
-    const pay = ev && ev.payment ? `Payment of <b>₱${esc(ev.payment.amount)}</b> with reference <b>${esc(ev.payment.reference)}</b>${ev.payment.payer ? ' from ' + esc(ev.payment.payer) : ''}.<br>` : '';
     if (decision === 'approve') {
-      const note = await decisionBox({ title: 'Approve event', intro: title + pay + (pay ? 'Confirm it was received in the SAO wallet. ' : '') + 'The event will be published and registration will open.', label: 'Message to the organization', okLabel: 'Approve event' });
+      const note = await decisionBox({ title: 'Approve event', intro: title + 'The event will be published and registration will open.', label: 'Message to the organization', okLabel: 'Approve event' });
       if (note === null) return;
       const r = await run(null, () => api('/api/events/' + id + '/approval', { method: 'POST', body: { decision, note } }), 'Event approved');
       if (r) refresh();
       return;
     }
-    const note = await decisionBox({ title: 'Disapprove event', intro: title + pay, label: 'Reason / message to the organization', required: true, danger: true, okLabel: 'Disapprove', placeholder: 'Explain why the event or payment was not approved.' });
+    const note = await decisionBox({ title: 'Disapprove event', intro: title, label: 'Reason / message to the organization', required: true, danger: true, okLabel: 'Disapprove', placeholder: 'Explain why the event was not approved.' });
     if (note === null) return;
     const r = await run(null, () => api('/api/events/' + id + '/approval', { method: 'POST', body: { decision, note } }), 'Event disapproved');
-    if (r) refresh();
-  },
-
-  async letters(id) {
-    const ev = ApprovalsUI.list.find((x) => x.id === id);
-    const title = ev ? `<b>${esc(ev.title)}</b>${ev.org_name ? ' · ' + esc(ev.org_name) : ''}<br>` : '';
-    const note = await decisionBox({ title: 'Request letters', intro: title + 'The organization will be notified of the letters they must submit before SAO decides.', label: 'Needed letters', required: true, okLabel: 'Notify organization', placeholder: 'Example: Letter of intent, adviser endorsement, venue permit.' });
-    if (note === null) return;
-    const r = await run(null, () => api('/api/events/' + id + '/request-letters', { method: 'POST', body: { note } }), 'Organization notified');
     if (r) refresh();
   },
 
@@ -559,80 +478,13 @@ const ApprovalsUI = {
     };
     const acts = (e) => {
       const id = esc(e.id);
-      if (e.status === 'pending') return `<button class="btn sm ghost" onclick="ApprovalsUI.letters('${id}')">Request letters</button><button class="btn sm" onclick="ApprovalsUI.decide('${id}','approve')">Approve</button><button class="btn sm danger" onclick="ApprovalsUI.decide('${id}','reject')">Disapprove</button>`;
+      if (e.status === 'pending') return `<button class="btn sm" onclick="ApprovalsUI.decide('${id}','approve')">Approve</button><button class="btn sm danger" onclick="ApprovalsUI.decide('${id}','reject')">Disapprove</button>`;
       if (e.status === 'rejected') return `<small style="max-width:200px">Reason: ${esc(e.approval_note)}</small>`;
       return chip('ok', 'Approved');
     };
     el.innerHTML = `<div class="card"><div class="toolbar">${tabsHtml([{ id: 'pending', label: 'Pending', count: sets.pending.length }, { id: 'approved', label: 'Approved', count: sets.approved.length }, { id: 'rejected', label: 'Disapproved', count: sets.rejected.length }], ApprovalsUI.tab)}</div>
       <div class="list">${sets[ApprovalsUI.tab].length ? sets[ApprovalsUI.tab].map((e) => eventRow(e, acts(e))).join('') : '<div class="empty">No events here</div>'}</div></div>`;
     bindTabs(el, (t) => { ApprovalsUI.tab = t; refresh(); });
-  }
-};
-
-const FeesUI = {
-  qr: '',
-
-  async save(btn) {
-    const body = {
-      paid_rate: $('#fsRate').value,
-      free_fee: $('#fsFree').value,
-      wallet_name: $('#fsName').value,
-      wallet_number: $('#fsNumber').value,
-      wallet_qr: $('#fsQrUrl').value // Grab the URL
-    };
-    const r = await run(btn, () => api('/api/settings', { method: 'PUT', body }), 'Fees and wallet saved');
-    if (r) refresh();
-  },
-
-  async view(el) {
-    const s = await api('/api/settings');
-    let pays = [];
-    try {
-      pays = await api('/api/payments');
-    } catch (e) {
-      pays = [];
-    }
-    FeesUI.qr = s.wallet_qr || '';
-    const verified = pays.filter((p) => p.payment_status === 'verified');
-    const total = verified.reduce((n, p) => n + Number(p.amount), 0);
-    
-    el.innerHTML = tilesHtml([['Paid event fee', s.paid_rate + '%'], ['Free event fee', '₱' + s.free_fee], ['Verified payments', verified.length], ['Total verified', '₱' + total.toFixed(2)]]) +
-      `<div class="split2"><div class="card"><h3>Fee rates</h3><div class="form-grid">
-        <div class="f"><label>Paid event fee (% of expected ticket sales)</label><input id="fsRate" type="number" min="0" max="100" step="0.1" value="${esc(s.paid_rate)}"></div>
-        <div class="f"><label>Free event fee (₱ per event)</label><input id="fsFree" type="number" min="0" step="1" value="${esc(s.free_fee)}"></div></div>
-        <p class="hint">Expected ticket sales = ticket price × seat limit. Paid events are charged the percentage, free events the flat fee.</p></div>
-      <div class="card"><h3>Payment wallet</h3><div class="form-grid">
-        <div class="f"><label>Account name</label><input id="fsName" value="${esc(s.wallet_name)}"></div>
-        <div class="f"><label>Account number</label><input id="fsNumber" value="${esc(s.wallet_number)}"></div>
-        
-        <!-- NEW: URL INPUT INSTEAD OF FILE UPLOAD -->
-        <div class="f full"><label>Wallet QR code Image URL</label><input id="fsQrUrl" placeholder="https://example.com/qr.png" value="${esc(s.wallet_qr)}"></div></div>
-        
-        <div style="margin-top:12px">
-            <img id="fsPrev" alt="Wallet QR" style="max-width:200px;border-radius:12px;border:1px solid var(--line);${s.wallet_qr ? '' : 'display:none'}" src="${esc(s.wallet_qr)}">
-        </div>
-      </div></div>
-      
-      <div class="page-actions"><button class="btn big" id="fsSave">Save fees and wallet</button></div>
-      <div class="card"><h3>Event payments</h3>${pays.length ? tableHtml(['Event', 'Organization', 'Type', 'Amount', 'Reference', 'Paid on', 'Status', ''], pays.map((p) => `<tr>
-        <td><b>${esc(p.title)}</b><small>${esc(label(p.event_status))}</small></td><td>${esc(p.org_name)}</td><td>${p.is_paid ? 'Paid · ₱' + esc(p.ticket_price) + ' × ' + esc(p.seat_limit) : 'Free'}</td>
-        <td>₱${esc(p.amount)}</td><td>${esc(p.reference)}${p.payer ? '<small>' + esc(p.payer) + '</small>' : ''}</td><td>${esc(fmtDT(p.submitted_at))}</td>
-        <td>${chip(p.payment_status === 'verified' ? 'ok' : p.payment_status === 'rejected' ? 'bad' : 'warn', label(p.payment_status))}</td>
-        <td><button class="btn sm ghost" data-msg="org" data-id="${esc(p.org_id)}" data-name="${esc(p.org_name)}" data-sub="${esc('Payment for "' + p.title + '"')}">Message</button></td></tr>`)) : '<div class="empty">No payments yet</div>'}</div>`;
-    
-    // NEW: Preview image when URL is typed
-    $('#fsQrUrl', el).oninput = (e) => {
-      FeesUI.qr = e.target.value.trim();
-      const prev = $('#fsPrev', el);
-      if (FeesUI.qr) {
-        prev.src = FeesUI.qr;
-        prev.style.display = '';
-      } else {
-        prev.style.display = 'none';
-      }
-    };
-    
-    $('#fsSave', el).onclick = (e) => FeesUI.save(e.target);
   }
 };
 

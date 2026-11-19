@@ -1,4 +1,4 @@
-const PRIVS = [['verify_accounts', 'Verify accounts'], ['manage_subscriptions', 'Fees and wallet'], ['monitor_events', 'Monitor events'], ['view_reports', 'View reports'], ['manage_events', 'Manage events'], ['approve_events', 'Approve events']];
+const PRIVS = [['verify_accounts', 'Verify accounts'], ['monitor_events', 'Monitor events'], ['view_reports', 'View reports'], ['manage_events', 'Manage events'], ['approve_events', 'Approve events']];
 
 const P = {
   uq: '',
@@ -12,14 +12,8 @@ const P = {
     P.userList = all;
     const count = (f) => all.filter(f).length;
     const me = Session.user.id;
-    const sem = st.semester || {};
-    const dOf = (v) => (v ? new Date(v + 'T00:00:00') : null);
-    const nowD = new Date();
-    const sd = dOf(sem.start);
-    const ed = dOf(sem.end);
-    const semNote = sd && ed
-      ? fmtD(sd) + ' to ' + fmtD(ed) + ' · ' + (nowD >= sd && nowD <= new Date(ed.getTime() + 86399999) ? 'Semester ongoing, student profiles are locked.' : nowD < sd ? 'Semester has not started, students can still edit.' : 'Semester ended, students can edit until you set the next semester.')
-      : 'No semester set, students can edit their information.';
+    const win = st.profile_window || {};
+    const inp = (iso) => (iso ? toLocalInput(iso) : '');
     const canCredit = (u) => u.role === 'student' || u.role === 'organization';
     const actions = (u) => {
       if (u.id === me) return '<small>You</small>';
@@ -27,18 +21,18 @@ const P = {
       return `${u.status === 'suspended' ? `<button class="btn sm" onclick="P.setStatus('${id}','active')">Restore</button>` : `<button class="btn sm ghost" onclick="P.setStatus('${id}','suspended')">Suspend</button>`}${canCredit(u) ? `<button class="btn sm ghost" onclick="P.credits('${id}')">Edit credits</button>` : ''}<button class="btn sm danger" onclick="P.delUser('${id}')">Delete</button>`;
     };
     el.innerHTML = tilesHtml([['Total accounts', all.length], ['Students', count((u) => u.role === 'student')], ['Officers', count((u) => u.role === 'organization')], ['Personnel and admins', count((u) => u.role === 'personnel' || u.role === 'superadmin')], ['Suspended', count((u) => u.status === 'suspended')]]) +
-      `<div class="card"><div class="win-head"><h3>Semester period</h3><p class="hint">Student profiles are locked while the semester runs. After it ends, students can update their information until you set the next semester.</p></div>
-        <div class="form-grid"><div class="f"><label for="wStart">Semester starts</label><input id="wStart" type="date" value="${esc(sem.start || '')}"></div><div class="f"><label for="wEnd">Semester ends</label><input id="wEnd" type="date" value="${esc(sem.end || '')}"></div></div>
-        <p class="hint"><b>Current:</b> ${esc(semNote)}</p>
-        <div class="page-actions"><button class="btn" id="wSave">Save semester</button><button class="btn ghost" id="wClear">Clear semester</button></div></div>` +
+      `<div class="card"><div class="win-head"><h3>Student profile update period</h3><p class="hint">Students can change their information only inside this period, or when you give them edit credits.</p></div>
+        <div class="form-grid"><div class="f"><label for="wStart">Opens</label><input id="wStart" type="datetime-local" value="${inp(win.start)}"></div><div class="f"><label for="wEnd">Closes</label><input id="wEnd" type="datetime-local" value="${inp(win.end)}"></div></div>
+        <div class="page-actions"><button class="btn" id="wSave">Save period</button><button class="btn ghost" id="wClear">Clear period</button></div></div>` +
       `<div class="card"><div class="toolbar"><div class="tools"><label class="search">${icon('search', 16)}<input id="uq" placeholder="Search name or email" value="${esc(P.uq)}"></label>
       <select class="pill" id="ur"><option value="">All roles</option>${Object.keys(ROLE_LABEL).map((r) => `<option value="${r}" ${r === P.urole ? 'selected' : ''}>${esc(ROLE_LABEL[r])}</option>`).join('')}</select>
       <select class="pill" id="us"><option value="">All statuses</option>${['active', 'pending', 'rejected', 'suspended'].map((s) => `<option value="${s}" ${s === P.ustatus ? 'selected' : ''}>${label(s)}</option>`).join('')}</select></div>
       <button class="btn big" onclick="P.createUser()">+ Create account</button></div>
       <div id="uTable"></div></div>`;
     const saveWin = async (clear) => {
-      const body = clear ? { start: '', end: '' } : { start: $('#wStart', el).value, end: $('#wEnd', el).value };
-      const r = await run(null, () => api('/api/admin/semester', { method: 'PUT', body }), (x) => x.message);
+      const iso = (id) => ($(id, el).value ? new Date($(id, el).value).toISOString() : '');
+      const body = clear ? { start: '', end: '' } : { start: iso('#wStart'), end: iso('#wEnd') };
+      const r = await run(null, () => api('/api/admin/profile-window', { method: 'PUT', body }), (x) => x.message);
       if (r) refresh();
     };
     $('#wSave', el).onclick = () => saveWin(false);
@@ -194,7 +188,6 @@ mountShell({
     { id: 'users', label: 'Users', icon: 'users' },
     { id: 'orgs', label: 'Organizations', icon: 'building' },
     { id: 'approvals', label: 'Event Approvals', icon: 'check' },
-    { id: 'fees', label: 'Fees & Wallet', icon: 'card' },
     { id: 'roles', label: 'Roles & Privileges', icon: 'key' },
     { id: 'logs', label: 'System Log', icon: 'list' },
     { id: 'profile', label: 'Profile', icon: 'user' }
@@ -203,7 +196,6 @@ mountShell({
     users: { title: 'User Accounts', render: P.users },
     orgs: { title: 'Organizations', render: P.orgs },
     approvals: { title: 'Event Approvals', render: ApprovalsUI.view },
-    fees: { title: 'Fees and Wallet', render: FeesUI.view },
     roles: { title: 'Roles and Privileges', render: P.roles },
     logs: { title: 'System Log', render: P.logs, after: (el) => { const i = $('#lq', el); if (i && P.lq) { i.focus(); i.setSelectionRange(P.lq.length, P.lq.length); } } },
     profile: { title: 'Profile', render: profileView }
